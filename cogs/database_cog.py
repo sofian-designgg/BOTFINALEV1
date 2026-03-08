@@ -80,7 +80,9 @@ class DatabaseCog(commands.Cog):
             stats = await db.command("dbStats")
 
             guilds_col = get_collection("guild_configs")
-            users_col = get_collection("users") or get_collection("economy")
+            users_col = get_collection("users")
+            if users_col is None:
+                users_col = get_collection("economy")
             guild_count = await guilds_col.count_documents({}) if guilds_col is not None else 0
             user_count = await users_col.count_documents({}) if users_col is not None else 0
 
