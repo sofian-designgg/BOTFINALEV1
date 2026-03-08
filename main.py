@@ -42,9 +42,14 @@ async def check_license(ctx):
 async def on_ready():
     """Au démarrage du bot"""
     import time
+    from cogs.giveaway_cog import GiveawayButton
+    from discord.ui import View
     bot.start_time = getattr(bot, 'start_time', time.time())
     mongo_ok = await is_connected()
     status = "[OK]" if mongo_ok else "[FAIL]"
+    view = View(timeout=None)
+    view.add_item(GiveawayButton())
+    bot.add_view(view)
     print("=" * 50)
     print(f"Bot connecté : {bot.user.name}#{bot.user.discriminator}")
     print(f"MongoDB : {status} {'Connecté' if mongo_ok else 'Déconnecté'}")

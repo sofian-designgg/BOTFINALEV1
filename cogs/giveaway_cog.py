@@ -28,24 +28,40 @@ class GiveawayButton(Button):
         super().__init__(style=discord.ButtonStyle.primary, emoji="🎉", custom_id="giveaway_join")
 
     async def callback(self, interaction):
+        await interaction.response.defer(ephemeral=True)
         col = get_collection("giveaways")
         doc = await col.find_one({"message_id": str(interaction.message.id)})
         if not doc:
-            await interaction.response.send_message("Giveaway introuvable.", ephemeral=True)
+            await interaction.followup.send("Giveaway introuvable.", ephemeral=True)
             return
         if doc.get("ended"):
-            await interaction.response.send_message("Ce giveaway est terminé.", ephemeral=True)
+            await interaction.followup.send("Ce giveaway est terminé.", ephemeral=True)
             return
-        participants = doc.get("participants", [])
+        participants = list(doc.get("participants", []))
         uid = str(interaction.user.id)
         if uid in participants:
             participants.remove(uid)
             await col.update_one({"message_id": str(interaction.message.id)}, {"$set": {"participants": participants}})
-            await interaction.response.send_message("Vous avez quitté le giveaway.", ephemeral=True)
+            msg_txt = "Vous avez quitté le giveaway."
         else:
             participants.append(uid)
             await col.update_one({"message_id": str(interaction.message.id)}, {"$set": {"participants": participants}})
-            await interaction.response.send_message("Vous avez rejoint le giveaway ! 🎉", ephemeral=True)
+            msg_txt = "Vous avez rejoint le giveaway ! 🎉"
+        # Actualiser l'embed
+        try:
+            color = await get_guild_color(interaction.guild.id)
+            embed = discord.Embed(
+                title="🎉 GIVEAWAY",
+                description=f"**{doc['prize']}**\n\nGagnants: **{doc['winners']}**\nParticipants: **{len(participants)}**\n\nFin: <t:{int(doc['end_time'])}:R>",
+                color=color,
+            )
+            embed.set_footer(text="Cliquez sur 🎉 pour participer !")
+            view = View(timeout=None)
+            view.add_item(GiveawayButton())
+            await interaction.message.edit(embed=embed, view=view)
+        except Exception:
+            pass
+        await interaction.followup.send(msg_txt, ephemeral=True)
 
 
 class GiveawayCog(commands.Cog):
