@@ -45,6 +45,9 @@ class StreaksCog(commands.Cog):
         try:
             member = member or ctx.author
             col = get_collection("activity_streaks")
+            if col is None:
+                await ctx.send(embed=error_embed("DB", "MongoDB déconnecté."))
+                return
             doc = await col.find_one({"guild_id": str(ctx.guild.id), "user_id": str(member.id)})
             streak_days = doc.get("streak", 0) if doc else 0
             last_active = doc.get("last_date")  # ISO date string
@@ -68,7 +71,7 @@ class StreaksCog(commands.Cog):
             vocal_bar = get_progress_bar(min(vc_count, vocal_goal), vocal_goal or 1, 10) if vocal_goal else "N/A"
 
             color = await get_guild_color(ctx.guild.id)
-            config = await get_guild_config(ctx.guild.id)
+            config = await get_guild_config(ctx.guild.id) or {}
             currency_emoji = config.get("currency_emoji", "💰")
 
             embed = discord.Embed(
@@ -91,6 +94,9 @@ class StreaksCog(commands.Cog):
         """Top 10 streaks"""
         try:
             col = get_collection("activity_streaks")
+            if col is None:
+                await ctx.send(embed=error_embed("DB", "MongoDB déconnecté."))
+                return
             cursor = col.find({"guild_id": str(ctx.guild.id)}).sort("streak", -1).limit(10)
             lines = []
             medals = ["🥇", "🥈", "🥉"]

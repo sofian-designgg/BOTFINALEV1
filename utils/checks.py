@@ -28,7 +28,7 @@ async def is_staff(ctx) -> bool:
         return True
     if ctx.author.guild_permissions.administrator:
         return True
-    config = await get_guild_config(ctx.guild.id)
+    config = (await get_guild_config(ctx.guild.id)) or {}
     admin_role_id = config.get("admin_role_id")
     if admin_role_id and any(r.id == admin_role_id for r in ctx.author.roles):
         return True

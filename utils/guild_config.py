@@ -27,7 +27,7 @@ DEFAULT_GUILD_CONFIG = {
 
 
 async def get_guild_config(guild_id: int) -> dict:
-    """Récupère la config d'un serveur"""
+    """Récupère la config d'un serveur (ne retourne jamais None)"""
     col = get_collection("guild_configs")
     if col is None:
         return DEFAULT_GUILD_CONFIG.copy()
@@ -69,7 +69,7 @@ async def get_prefix(bot, message) -> str:
 
 async def get_guild_color(guild_id: int) -> int:
     """Couleur du serveur pour les embeds"""
-    config = await get_guild_config(guild_id)
+    config = (await get_guild_config(guild_id)) or {}
     color = config.get("color", DEFAULT_COLOR)
     if isinstance(color, str):
         color = color.lstrip("#")

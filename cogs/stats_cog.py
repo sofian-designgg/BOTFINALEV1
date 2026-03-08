@@ -230,6 +230,12 @@ class StatsCog(commands.Cog):
             color = await get_guild_color(ctx.guild.id)
             if type_arg == "messages":
                 col = get_collection("message_stats")
+            else:
+                col = get_collection("voice_stats")
+            if col is None:
+                await ctx.send(embed=error_embed("DB", "MongoDB déconnecté."))
+                return
+            if type_arg == "messages":
                 pipeline = [
                     {"$match": {"guild_id": str(ctx.guild.id)}},
                     {"$group": {"_id": "$user_id", "total": {"$sum": "$count"}}},
@@ -238,7 +244,6 @@ class StatsCog(commands.Cog):
                 ]
                 title = "📊 Top 10 Messages"
             else:
-                col = get_collection("voice_stats")
                 pipeline = [
                     {"$match": {"guild_id": str(ctx.guild.id)}},
                     {"$group": {"_id": "$user_id", "total": {"$sum": "$minutes"}}},

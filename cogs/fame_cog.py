@@ -13,7 +13,7 @@ from cogs.xp_cog import level_from_xp
 
 async def get_member_stats(bot, guild_id: int, member: discord.Member) -> dict:
     """Récupère les stats d'un membre : rôle, argent, XP, fame, activité"""
-    config = await get_guild_config(guild_id)
+    config = (await get_guild_config(guild_id)) or {}
     currency_emoji = config.get("currency_emoji", "💰")
     currency_name = config.get("currency_name", "SayuCoins")
 
