@@ -69,7 +69,7 @@ class ModerationCog(commands.Cog):
             await send_mod_log(self.bot, ctx.guild.id, log_embed)
 
             col = get_collection("mod_logs")
-            if col:
+            if col is not None:
                 await col.insert_one({"type": "ban", "guild_id": str(ctx.guild.id), "user_id": str(member.id), "mod_id": str(ctx.author.id), "reason": reason})
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
@@ -429,7 +429,7 @@ class ModerationCog(commands.Cog):
         automod = config.get("automod", {})
         # On peut étendre l'auto-mod plus tard avec des configs
         col = get_collection("banned_words")
-        doc = await col.find_one({"guild_id": str(message.guild.id)}) if col else None
+        doc = await col.find_one({"guild_id": str(message.guild.id)}) if col is not None else None
         words = doc.get("words", []) if doc else []
         content = message.content.lower()
         for w in words:

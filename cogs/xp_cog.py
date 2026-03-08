@@ -69,7 +69,7 @@ class XPCog(commands.Cog):
         config = await get_guild_config(message.guild.id)
         xp_multi = 1.0
         col_roles = get_collection("xp_multipliers")
-        if col_roles:
+        if col_roles is not None:
             doc = await col_roles.find_one({"guild_id": str(message.guild.id)})
             if doc:
                 for r in message.author.roles:
@@ -100,7 +100,7 @@ class XPCog(commands.Cog):
             embed.set_thumbnail(url=message.author.display_avatar.url)
             channel = message.channel
             col_roles = get_collection("level_roles")
-            if col_roles:
+            if col_roles is not None:
                 doc = await col_roles.find_one({"guild_id": str(message.guild.id)})
                 if doc and str(new_level) in doc.get("roles", {}):
                     role_id = doc["roles"][str(new_level)]

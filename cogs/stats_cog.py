@@ -172,7 +172,7 @@ class StatsCog(commands.Cog):
         if message.author.bot or not message.guild:
             return
         col = get_collection("message_stats")
-        if col:
+        if col is not None:
             try:
                 from datetime import datetime, timezone
                 today = datetime.now(timezone.utc).date().isoformat()
@@ -190,7 +190,7 @@ class StatsCog(commands.Cog):
         if member.bot or not member.guild:
             return
         col = get_collection("voice_sessions")
-        if col and before.channel != after.channel:
+        if col is not None and before.channel != after.channel:
             from datetime import datetime, timezone
             now = datetime.now(timezone.utc)
             today = now.date().isoformat()
@@ -204,7 +204,7 @@ class StatsCog(commands.Cog):
                     except (TypeError, AttributeError):
                         dur = 60
                     vc_col = get_collection("voice_stats")
-                    if vc_col:
+                    if vc_col is not None:
                         await vc_col.update_one(
                             {"guild_id": str(member.guild.id), "user_id": str(member.id), "date": today},
                             {"$inc": {"minutes": int(dur / 60)}},

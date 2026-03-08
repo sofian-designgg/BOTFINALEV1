@@ -81,8 +81,8 @@ class DatabaseCog(commands.Cog):
 
             guilds_col = get_collection("guild_configs")
             users_col = get_collection("users") or get_collection("economy")
-            guild_count = await guilds_col.count_documents({}) if guilds_col else 0
-            user_count = await users_col.count_documents({}) if users_col else 0
+            guild_count = await guilds_col.count_documents({}) if guilds_col is not None else 0
+            user_count = await users_col.count_documents({}) if users_col is not None else 0
 
             uptime_sec = int(time.time() - getattr(self.bot, 'start_time', time.time()))
             uptime_str = f"{uptime_sec // 3600}h {(uptime_sec % 3600) // 60}m"

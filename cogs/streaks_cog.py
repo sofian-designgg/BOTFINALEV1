@@ -54,11 +54,11 @@ class StreaksCog(commands.Cog):
             vc_col = get_collection("voice_stats")
             msg_count = 0
             vc_count = 0
-            if msg_col:
+            if msg_col is not None:
                 cur = msg_col.find({"guild_id": str(ctx.guild.id), "user_id": str(member.id), "date": today})
                 async for d in cur:
                     msg_count += d.get("count", 0)
-            if vc_col:
+            if vc_col is not None:
                 cur = vc_col.find({"guild_id": str(ctx.guild.id), "user_id": str(member.id), "date": today})
                 async for d in cur:
                     vc_count += d.get("minutes", 0)

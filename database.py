@@ -24,7 +24,7 @@ async def connect_db():
 async def close_db():
     """Fermer la connexion"""
     global _client
-    if _client:
+    if _client is not None:
         _client.close()
 
 
