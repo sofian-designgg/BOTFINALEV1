@@ -19,7 +19,7 @@ def generate_code() -> str:
     return f"SAYU-{p1}-{p2}-{p3}"
 
 
-class LicenseCog(commands.Cog):
+class LicenseCog(commands.Cog): 
     def __init__(self, bot):
         self.bot = bot
 
@@ -72,7 +72,7 @@ class LicenseCog(commands.Cog):
 
             col_codes = get_collection("license_codes")
             col_licenses = get_collection("licenses")
-            if not col_codes or not col_licenses:
+           if col_codes is None or col_licenses is None:
                 await ctx.send(embed=error_embed("DB", "Base de données indisponible."))
                 return
 
