@@ -7,15 +7,90 @@ from discord.ui import Button, View
 from database import get_collection, is_connected
 from utils.embeds import success_embed, error_embed, get_progress_bar
 from utils.guild_config import get_guild_config, get_guild_color
+from cogs.economy_cog import get_balance
+from cogs.xp_cog import level_from_xp
+
+
+async def get_member_stats(bot, guild_id: int, member: discord.Member) -> dict:
+    """Récupère les stats d'un membre : rôle, argent, XP, fame, activité"""
+    config = await get_guild_config(guild_id)
+    currency_emoji = config.get("currency_emoji", "💰")
+    currency_name = config.get("currency_name", "SayuCoins")
+
+    role = member.top_role.name if member.top_role and member.top_role.name != "@everyone" else "Aucun"
+    money = await get_balance(guild_id, member.id)
+
+    col_xp = get_collection("xp")
+    xp = 0
+    if col_xp is not None:
+        doc = await col_xp.find_one({"guild_id": str(guild_id), "user_id": str(member.id)})
+        xp = doc.get("xp", 0) if doc else 0
+    level = level_from_xp(xp)
+
+    col_fame = get_collection("fame")
+    fame = 0
+    if col_fame is not None:
+        doc = await col_fame.find_one({"guild_id": str(guild_id), "user_id": str(member.id)})
+        fame = doc.get("score", 0) if doc else 0
+
+    col_msg = get_collection("message_stats")
+    col_vc = get_collection("voice_stats")
+    msg_count = 0
+    vc_min = 0
+    if col_msg is not None:
+        pipeline = [{"$match": {"guild_id": str(guild_id), "user_id": str(member.id)}},
+                    {"$group": {"_id": None, "total": {"$sum": "$count"}}}]
+        async for d in col_msg.aggregate(pipeline):
+            msg_count = d.get("total", 0)
+            break
+    if col_vc is not None:
+        pipeline = [{"$match": {"guild_id": str(guild_id), "user_id": str(member.id)}},
+                    {"$group": {"_id": None, "total": {"$sum": "$minutes"}}}]
+        async for d in col_vc.aggregate(pipeline):
+            vc_min = d.get("total", 0)
+            break
+
+    return {
+        "role": role,
+        "money": money,
+        "currency_emoji": currency_emoji,
+        "currency_name": currency_name,
+        "xp": xp,
+        "level": level,
+        "fame": fame,
+        "messages": msg_count,
+        "vocal_min": vc_min,
+    }
+
+
+def build_duel_embed(member: discord.Member, stats: dict, votes: int, color: int, is_user1: bool):
+    """Construit l'embed de profil pour un membre du duel"""
+    num = "1️⃣" if is_user1 else "2️⃣"
+    embed = discord.Embed(
+        title=f"{num} {member.display_name}",
+        color=color,
+    )
+    embed.set_image(url=member.display_avatar.url)
+    embed.add_field(name="👑 Rôle", value=stats["role"], inline=True)
+    embed.add_field(name=f"{stats['currency_emoji']} Argent", value=f"{stats['money']:,} {stats['currency_name']}", inline=True)
+    embed.add_field(name="⭐ Niveau", value=f"Niv. {stats['level']} ({stats['xp']:,} XP)", inline=True)
+    embed.add_field(name="⭐ Réputation", value=str(stats["fame"]), inline=True)
+    embed.add_field(name="💬 Messages", value=f"{stats['messages']:,}", inline=True)
+    embed.add_field(name="🔊 Vocal", value=f"{stats['vocal_min']} min", inline=True)
+    embed.add_field(name="🗳️ Votes", value=f"**{votes}**", inline=False)
+    return embed
 
 
 class DuelView(View):
-    def __init__(self, bot, ctx, user1, user2, timeout=60):
+    def __init__(self, bot, ctx, user1, user2, stats1, stats2, color, timeout=60):
         super().__init__(timeout=timeout)
         self.bot = bot
         self.ctx = ctx
         self.user1 = user1
         self.user2 = user2
+        self.stats1 = stats1
+        self.stats2 = stats2
+        self.color = color
         self.votes1 = 0
         self.votes2 = 0
         self.voters = set()
@@ -24,8 +99,8 @@ class DuelView(View):
             await self.vote(interaction, 1)
         async def vote2_cb(interaction):
             await self.vote(interaction, 2)
-        btn1 = Button(label="Vote 1", style=discord.ButtonStyle.primary, emoji="1️⃣", custom_id="vote1")
-        btn2 = Button(label="Vote 2", style=discord.ButtonStyle.primary, emoji="2️⃣", custom_id="vote2")
+        btn1 = Button(label=f"Vote {user1.display_name[:15]}", style=discord.ButtonStyle.primary, emoji="1️⃣", custom_id="vote1")
+        btn2 = Button(label=f"Vote {user2.display_name[:15]}", style=discord.ButtonStyle.primary, emoji="2️⃣", custom_id="vote2")
         btn1.callback = vote1_cb
         btn2.callback = vote2_cb
         self.add_item(btn1)
@@ -40,20 +115,13 @@ class DuelView(View):
             self.votes1 += 1
         else:
             self.votes2 += 1
-        color_val = await get_guild_color(self.ctx.guild.id)
-        embed = self.build_embed(color_val)
-        await interaction.response.edit_message(embed=embed)
+        embeds = self.build_embeds()
+        await interaction.response.edit_message(embeds=embeds)
 
-    def build_embed(self, color):
-        embed = discord.Embed(
-            title="⚔️ Duel de réputation",
-            description=f"**{self.user1.display_name}** vs **{self.user2.display_name}**",
-            color=color,
-        )
-        embed.set_thumbnail(url=self.user1.display_avatar.url)
-        embed.add_field(name=f"1️⃣ {self.user1.display_name}", value=f"**{self.votes1}** votes", inline=True)
-        embed.add_field(name=f"2️⃣ {self.user2.display_name}", value=f"**{self.votes2}** votes", inline=True)
-        return embed
+    def build_embeds(self):
+        e1 = build_duel_embed(self.user1, self.stats1, self.votes1, self.color, True)
+        e2 = build_duel_embed(self.user2, self.stats2, self.votes2, self.color, False)
+        return [e1, e2]
 
 
 class FameCog(commands.Cog):
@@ -122,17 +190,18 @@ class FameCog(commands.Cog):
 
     @commands.command(name="duel")
     async def duel(self, ctx, member: discord.Member):
-        """Duel de réputation — 2 photos côte à côte, vote par boutons"""
+        """Duel de réputation — 2 profils complets avec rôle, argent, XP, activité"""
         try:
             if member.bot or member.id == ctx.author.id:
                 await ctx.send(embed=error_embed("Erreur", "Cible invalide."))
                 return
 
             color = await get_guild_color(ctx.guild.id)
-            view = DuelView(self.bot, ctx, ctx.author, member)
-            embed = view.build_embed(color)
-            embed.set_image(url=ctx.author.display_avatar.url)
-            await ctx.send(embed=embed, view=view)
+            stats1 = await get_member_stats(self.bot, ctx.guild.id, ctx.author)
+            stats2 = await get_member_stats(self.bot, ctx.guild.id, member)
+            view = DuelView(self.bot, ctx, ctx.author, member, stats1, stats2, color)
+            embeds = view.build_embeds()
+            await ctx.send(embeds=embeds, view=view)
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
