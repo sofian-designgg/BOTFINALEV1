@@ -130,13 +130,15 @@ class StatsCog(commands.Cog):
                 d = (now - timedelta(days=i)).date()
                 labels.append(d.strftime("%d/%m"))
                 day_str = d.isoformat()
-                count_msg = await col_msg.count_documents({
-                    "guild_id": str(ctx.guild.id),
-                    "date": {"$regex": f"^{day_str}"}
-                })
-                pipeline = [{"$match": {"guild_id": str(ctx.guild.id), "date": {"$regex": f"^{day_str}"}}},
-                           {"$group": {"_id": None, "total": {"$sum": "$minutes"}}}]
-                cur = col_vc.aggregate(pipeline)
+                pipeline_msg = [{"$match": {"guild_id": str(ctx.guild.id), "date": day_str}},
+                               {"$group": {"_id": None, "total": {"$sum": "$count"}}}]
+                count_msg = 0
+                async for doc in col_msg.aggregate(pipeline_msg):
+                    count_msg = doc.get("total", 0)
+                    break
+                pipeline_vc = [{"$match": {"guild_id": str(ctx.guild.id), "date": day_str}},
+                              {"$group": {"_id": None, "total": {"$sum": "$minutes"}}}]
+                cur = col_vc.aggregate(pipeline_vc)
                 vc_total = 0
                 async for doc in cur:
                     vc_total = doc.get("total", 0)
@@ -199,8 +201,11 @@ class StatsCog(commands.Cog):
                 doc = await col.find_one({"guild_id": str(member.guild.id), "user_id": str(member.id), "channel_id": str(before.channel.id)})
                 if doc:
                     joined = doc.get("joined", now)
+                    if getattr(joined, "tzinfo", None) is None and hasattr(joined, "replace"):
+                        joined = joined.replace(tzinfo=timezone.utc)
                     try:
                         dur = (now - joined).total_seconds()
+                        dur = max(0, min(dur, 86400))
                     except (TypeError, AttributeError):
                         dur = 60
                     vc_col = get_collection("voice_stats")

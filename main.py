@@ -101,6 +101,7 @@ async def load_extensions():
         "cogs.streaks_cog",
         "cogs.invites_cog",
         "cogs.welcome_cog",
+        "cogs.voice_roles_cog",
     ]
     for cog in cogs:
         try:

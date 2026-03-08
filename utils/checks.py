@@ -11,6 +11,7 @@ CONSULT_COMMANDS = {
     "stats", "serverstats", "ranking",
     "fame", "fameleaderboard", "streak", "streakleaderboard",
     "invites", "inviteleaderboard", "mylink", "createinvite",
+    "voiceprogress", "vocalprogress", "vp",
     "shop", "inventory", "glist",
     "settings", "ping", "licenceinfo", "redeem",
     # Modération view only
