@@ -189,11 +189,17 @@ class FameCog(commands.Cog):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="duel")
-    async def duel(self, ctx, member: discord.Member):
+    async def duel(self, ctx, member: discord.Member = None):
         """Duel de réputation — 2 profils complets avec rôle, argent, XP, activité"""
         try:
-            if member.bot or member.id == ctx.author.id:
-                await ctx.send(embed=error_embed("Erreur", "Cible invalide."))
+            if member is None:
+                await ctx.send(embed=error_embed("Usage", "Mentionne quelqu'un : `+duel @membre`"))
+                return
+            if member.bot:
+                await ctx.send(embed=error_embed("Erreur", "Tu ne peux pas défier un bot. Mentionne un membre : `+duel @membre`"))
+                return
+            if member.id == ctx.author.id:
+                await ctx.send(embed=error_embed("Erreur", "Tu ne peux pas te défier toi-même ! Mentionne quelqu'un d'autre : `+duel @membre`"))
                 return
 
             color = await get_guild_color(ctx.guild.id)

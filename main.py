@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 from database import connect_db, close_db, is_connected, get_collection
 from utils.guild_config import get_prefix
+from utils.checks import can_use_command, CONSULT_COMMANDS
 from config import TOKEN, MONGO_URL, OWNER_ID
 
 # Intents
@@ -52,12 +53,13 @@ async def on_ready():
 
 @bot.before_invoke
 async def before_command(ctx):
-    """Vérification avant chaque commande (sauf redeem)"""
+    """Vérification avant chaque commande"""
     if not ctx.command:
         return
     if ctx.command.name == "redeem":
         return
     if ctx.guild:
+        # Vérification licence
         has_license = await check_license(ctx)
         if not has_license:
             from utils.embeds import error_embed
@@ -67,6 +69,13 @@ async def before_command(ctx):
             )
             await ctx.send(embed=embed)
             raise commands.CheckFailure("No license")
+        # Restriction : seuls consultation + invites pour les non-staff
+        allowed, err_msg = await can_use_command(ctx, ctx.command.name)
+        if not allowed:
+            from utils.embeds import error_embed
+            embed = error_embed("Accès refusé", err_msg)
+            await ctx.send(embed=embed)
+            raise commands.CheckFailure("Staff only")
 
 
 async def load_extensions():
