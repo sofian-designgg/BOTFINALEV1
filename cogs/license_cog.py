@@ -24,12 +24,12 @@ class LicenseCog(commands.Cog):
         self.bot = bot
 
     @commands.command(name="gencode")
-    @commands.is_owner()
     async def gencode(self, ctx, amount: int = 1):
         """Génère des codes licence (propriétaire uniquement)"""
         try:
-            if ctx.author.id != OWNER_ID and ctx.author.id != ctx.bot.owner_id:
-                await ctx.send(embed=error_embed("Accès refusé", "Réservé au propriétaire du bot."))
+            owner = ctx.bot.owner_id or OWNER_ID
+            if not owner or ctx.author.id != owner:
+                await ctx.send(embed=error_embed("Accès refusé", "Réservé au propriétaire du bot. Vérifie que OWNER_ID est configuré sur Railway avec ton ID Discord."))
                 return
 
             col = get_collection("license_codes")
@@ -72,7 +72,7 @@ class LicenseCog(commands.Cog):
 
             col_codes = get_collection("license_codes")
             col_licenses = get_collection("licenses")
-           if col_codes is None or col_licenses is None:
+            if col_codes is None or col_licenses is None:
                 await ctx.send(embed=error_embed("DB", "Base de données indisponible."))
                 return
 
@@ -101,11 +101,12 @@ class LicenseCog(commands.Cog):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="listcodes")
-    @commands.is_owner()
     async def listcodes(self, ctx):
         """Liste tous les codes (propriétaire)"""
         try:
-            if ctx.author.id != OWNER_ID and ctx.author.id != ctx.bot.owner_id:
+            owner = ctx.bot.owner_id or OWNER_ID
+            if not owner or ctx.author.id != owner:
+                await ctx.send(embed=error_embed("Accès refusé", "Réservé au propriétaire du bot."))
                 return
 
             col = get_collection("license_codes")
@@ -132,11 +133,12 @@ class LicenseCog(commands.Cog):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="revoke")
-    @commands.is_owner()
     async def revoke(self, ctx, guild_id: str):
         """Révoque l'accès d'un serveur"""
         try:
-            if ctx.author.id != OWNER_ID and ctx.author.id != ctx.bot.owner_id:
+            owner = ctx.bot.owner_id or OWNER_ID
+            if not owner or ctx.author.id != owner:
+                await ctx.send(embed=error_embed("Accès refusé", "Réservé au propriétaire du bot."))
                 return
 
             col = get_collection("licenses")
