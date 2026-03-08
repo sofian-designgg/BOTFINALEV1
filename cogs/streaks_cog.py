@@ -49,8 +49,8 @@ class StreaksCog(commands.Cog):
                 await ctx.send(embed=error_embed("DB", "MongoDB déconnecté."))
                 return
             doc = await col.find_one({"guild_id": str(ctx.guild.id), "user_id": str(member.id)})
-            streak_days = doc.get("streak", 0) if doc else 0
-            last_active = doc.get("last_date")  # ISO date string
+            doc = doc or {}
+            streak_days = doc.get("streak", 0)
             today = datetime.now(timezone.utc).date().isoformat()
 
             msg_col = get_collection("message_stats")
@@ -60,11 +60,11 @@ class StreaksCog(commands.Cog):
             if msg_col is not None:
                 cur = msg_col.find({"guild_id": str(ctx.guild.id), "user_id": str(member.id), "date": today})
                 async for d in cur:
-                    msg_count += d.get("count", 0)
+                    msg_count += (d or {}).get("count", 0)
             if vc_col is not None:
                 cur = vc_col.find({"guild_id": str(ctx.guild.id), "user_id": str(member.id), "date": today})
                 async for d in cur:
-                    vc_count += d.get("minutes", 0)
+                    vc_count += (d or {}).get("minutes", 0)
 
             msg_goal, vocal_goal = get_goal(streak_days)
             msg_bar = get_progress_bar(min(msg_count, msg_goal), msg_goal, 10)
@@ -102,8 +102,9 @@ class StreaksCog(commands.Cog):
             medals = ["🥇", "🥈", "🥉"]
             idx = 0
             async for doc in cursor:
-                user = self.bot.get_user(int(doc["user_id"]))
-                name = user.display_name if user else f"User {doc['user_id']}"
+                doc = doc or {}
+                user = self.bot.get_user(int(doc.get("user_id", 0)))
+                name = user.display_name if user else f"User {doc.get('user_id', '?')}"
                 streak = doc.get("streak", 0)
                 medal = medals[idx] if idx < 3 else f"**{idx + 1}**"
                 lines.append(f"{medal} **{name}** — {streak} jour(s) 🔥")
