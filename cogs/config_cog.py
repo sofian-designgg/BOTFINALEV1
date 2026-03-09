@@ -68,13 +68,21 @@ class ConfigCog(commands.Cog):
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
-    @commands.command(name="setcurrency")
-    async def setcurrency(self, ctx, name: str, emoji: str = "💰"):
-        """Renomme la monnaie (ex: SayuCoins GoldCoins 🪙)"""
+    @commands.command(name="setcurrency", aliases=["seteconomy", "setmonnaie"])
+    async def setcurrency(self, ctx, *, args: str = None):
+        """+setcurrency [nom] ou +setcurrency [nom] [emoji] — Change le nom de l'économie"""
         try:
             if not ctx.author.guild_permissions.administrator:
                 await ctx.send(embed=error_embed("Permissions", "Administrateur requis."))
                 return
+            if not args or not args.strip():
+                await ctx.send(embed=error_embed("Usage", "`+setcurrency [nom]` ou `+setcurrency [nom] [emoji]`\nEx: `+setcurrency GoldCoins` ou `+setcurrency Sayu Coins 🪙`"))
+                return
+            parts = args.strip().rsplit(maxsplit=1)
+            if len(parts) == 2 and len(parts[1]) <= 4 and not parts[1][0].isalnum():
+                name, emoji = parts[0], parts[1]
+            else:
+                name, emoji = args.strip(), "💰"
             await update_guild_config(ctx.guild.id, {"currency_name": name, "currency_emoji": emoji})
             await ctx.send(embed=success_embed("Monnaie", f"Nouvelle monnaie : **{name}** {emoji}", await get_guild_color(ctx.guild.id)))
         except Exception as e:

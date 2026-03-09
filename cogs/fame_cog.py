@@ -67,14 +67,14 @@ def build_duel_embed(member: discord.Member, stats: dict, votes: int, color: int
     """Construit l'embed de profil pour un membre du duel"""
     num = "1️⃣" if is_user1 else "2️⃣"
     embed = discord.Embed(
-        title=f"{num} {member.display_name}",
+        title=f"💮 {num} {member.display_name}",
         color=color,
     )
     embed.set_image(url=member.display_avatar.url)
     embed.add_field(name="👑 Rôle", value=stats["role"], inline=True)
     embed.add_field(name=f"{stats['currency_emoji']} Argent", value=f"{stats['money']:,} {stats['currency_name']}", inline=True)
     embed.add_field(name="⭐ Niveau", value=f"Niv. {stats['level']} ({stats['xp']:,} XP)", inline=True)
-    embed.add_field(name="⭐ Réputation", value=str(stats["fame"]), inline=True)
+    embed.add_field(name="💮 Réputation", value=str(stats["fame"]), inline=True)
     embed.add_field(name="💬 Messages", value=f"{stats['messages']:,}", inline=True)
     embed.add_field(name="🔊 Vocal", value=f"{stats['vocal_min']} min", inline=True)
     embed.add_field(name="🗳️ Votes", value=f"**{votes}**", inline=False)
@@ -189,25 +189,36 @@ class FameCog(commands.Cog):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="duel")
-    async def duel(self, ctx, member: discord.Member = None):
-        """Duel de réputation — 2 profils complets avec rôle, argent, XP, activité"""
+    async def duel(self, ctx, membre1: discord.Member = None, membre2: discord.Member = None):
+        """+duel @personne1 @personne2 — Met en duel deux membres (organisé par le lead)"""
         try:
-            if member is None:
-                await ctx.send(embed=error_embed("Usage", "Mentionne quelqu'un : `+duel @membre`"))
+            if membre1 is None or membre2 is None:
+                await ctx.send(embed=error_embed(
+                    "Usage",
+                    "Mentionne **les deux** personnes à mettre en duel :\n`+duel @personne1 @personne2` 💮"
+                ))
                 return
-            if member.bot:
-                await ctx.send(embed=error_embed("Erreur", "Tu ne peux pas défier un bot. Mentionne un membre : `+duel @membre`"))
+            if membre1.bot or membre2.bot:
+                await ctx.send(embed=error_embed("Erreur", "Tu ne peux pas mettre un bot en duel."))
                 return
-            if member.id == ctx.author.id:
-                await ctx.send(embed=error_embed("Erreur", "Tu ne peux pas te défier toi-même ! Mentionne quelqu'un d'autre : `+duel @membre`"))
+            if membre1.id == membre2.id:
+                await ctx.send(embed=error_embed("Erreur", "Les deux personnes doivent être différentes."))
                 return
 
-            color = await get_guild_color(ctx.guild.id)
-            stats1 = await get_member_stats(self.bot, ctx.guild.id, ctx.author)
-            stats2 = await get_member_stats(self.bot, ctx.guild.id, member)
-            view = DuelView(self.bot, ctx, ctx.author, member, stats1, stats2, color)
+            color_val = await get_guild_color(ctx.guild.id)
+            stats1 = await get_member_stats(self.bot, ctx.guild.id, membre1)
+            stats2 = await get_member_stats(self.bot, ctx.guild.id, membre2)
+            view = DuelView(self.bot, ctx, membre1, membre2, stats1, stats2, color_val)
             embeds = view.build_embeds()
-            await ctx.send(embeds=embeds, view=view)
+
+            header = discord.Embed(
+                title="💮 Duel de réputation",
+                description=f"**{membre1.display_name}** vs **{membre2.display_name}**\n\n_Votez pour votre favori ci-dessous !_",
+                color=color_val,
+            )
+            header.set_footer(text="Organisé par " + ctx.author.display_name)
+            full_embeds = [header] + embeds
+            await ctx.send(embeds=full_embeds, view=view)
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 

@@ -1,12 +1,12 @@
 """
 Cog DM / Annonces
 """
-import asyncio
 import discord
 from discord.ext import commands
 from database import get_collection, is_connected
 from utils.embeds import success_embed, error_embed
 from utils.guild_config import get_guild_config, get_guild_color
+from dmall.sender import send_dm_all
 
 
 class AnnouncementsCog(commands.Cog):
@@ -23,20 +23,24 @@ class AnnouncementsCog(commands.Cog):
 
     @commands.command(name="dmall")
     @commands.has_permissions(administrator=True)
-    @commands.cooldown(1, 300, commands.BucketType.guild)
+    @commands.cooldown(1, 600, commands.BucketType.guild)
     async def dmall(self, ctx, *, message: str):
-        """Envoie un DM à tous les membres (confirmation double, envoi sécurisé)"""
+        """Envoie un DM à tous les membres (anti-rate-limit, 3-6s entre chaque)"""
         try:
             members = [m for m in ctx.guild.members if not m.bot]
+            if not members:
+                await ctx.send(embed=error_embed("Erreur", "Aucun membre à contacter."))
+                return
+
             color = await get_guild_color(ctx.guild.id)
             embed = discord.Embed(
                 title="📢 Confirmation DM All",
                 description=f"Vous allez envoyer à **{len(members)}** membres :\n\n{message[:400]}{'...' if len(message) > 400 else ''}",
                 color=color,
             )
-            embed.add_field(name="🔒 Sécurité", value="Tapez exactement `CONFIRMER` pour valider, ou `annuler` pour annuler.", inline=False)
-            embed.add_field(name="⏱️ Cooldown", value="Une seule utilisation toutes les 5 minutes par serveur.", inline=False)
-            embed.set_footer(text="Les DMs sont envoyés avec 2.5s de délai pour éviter le rate limit.")
+            embed.add_field(name="🔒 Confirmation", value="Tapez `CONFIRMER` pour valider, ou `annuler` pour annuler.", inline=False)
+            embed.add_field(name="⏱️ Anti-rate-limit", value="Délai de 3 à 6 secondes entre chaque DM (évite la détection Discord).", inline=False)
+            embed.set_footer(text="Cooldown: 10 min entre chaque utilisation.")
             await ctx.send(embed=embed)
 
             def check(m):
@@ -48,49 +52,31 @@ class AnnouncementsCog(commands.Cog):
                 return
 
             if msg.content.strip().upper() != "CONFIRMER":
-                await ctx.send(embed=error_embed("Annulé", "Envoi annulé. Tapez `CONFIRMER` pour valider."))
+                await ctx.send(embed=error_embed("Annulé", "Envoi annulé."))
                 return
 
             status_msg = await ctx.send("📤 Envoi en cours... (0/" + str(len(members)) + ")")
-            success = 0
-            failed = 0
-            to_send = message[:2000]
 
-            for i, m in enumerate(members):
-                for attempt in range(2):
-                    try:
-                        dm = m.dm_channel or await m.create_dm()
-                        await asyncio.sleep(0.5)
-                        await dm.send(to_send)
-                        success += 1
-                        break
-                    except discord.Forbidden:
-                        failed += 1
-                        break
-                    except Exception:
-                        if attempt == 0:
-                            await asyncio.sleep(5)
-                        else:
-                            failed += 1
-                            break
+            async def on_progress(current, total, success, failed, extra):
+                try:
+                    txt = f"📤 Envoi... ({current}/{total}) ✅ {success} ❌ {failed}"
+                    if extra:
+                        txt += f"\n{extra}"
+                    await status_msg.edit(content=txt)
+                except Exception:
+                    pass
 
-                await asyncio.sleep(2.5)
-                if (i + 1) % 10 == 0 or i + 1 == len(members):
-                    try:
-                        await status_msg.edit(content=f"📤 Envoi en cours... ({i + 1}/{len(members)}) ✅ {success} | ❌ {failed}")
-                    except Exception:
-                        pass
+            success, failed = await send_dm_all(members, message, on_progress)
 
-            color = await get_guild_color(ctx.guild.id)
             embed = success_embed(
                 "DM All terminé",
-                f"✅ **{success}** membres ont reçu le message\n❌ **{failed}** n'ont pas pu recevoir (DMs fermés)\n📊 Total: **{len(members)}** membres",
+                f"✅ **{success}** membres ont reçu le message\n❌ **{failed}** n'ont pas pu (DMs fermés)\n📊 Total: **{len(members)}**",
                 color
             )
-            embed.set_footer(text="Les échecs = membres avec DMs fermés pour les serveurs.")
+            embed.set_footer(text="DMs fermés = membres ayant désactivé les messages du serveur.")
             await status_msg.edit(content=None, embed=embed)
         except commands.CommandOnCooldown as e:
-            await ctx.send(embed=error_embed("Cooldown", f"Attendez {int(e.retry_after)}s avant de réutiliser cette commande."))
+            await ctx.send(embed=error_embed("Cooldown", f"Attendez {int(e.retry_after)} secondes avant de réutiliser."))
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
