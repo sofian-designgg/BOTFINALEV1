@@ -38,7 +38,7 @@ class TriviaView(View):
                 async def cb(interaction):
                     await self.answer(interaction, idx)
                 return cb
-            btn = Button(label=ans[:80], style=discord.ButtonStyle.primary, custom_id=str(i))
+            btn = Button(label=ans[:80], style=discord.ButtonStyle.secondary, custom_id=str(i))
             btn.callback = make_cb(i)
             self.add_item(btn)
 
@@ -237,7 +237,7 @@ class MinigamesCog(commands.Cog):
                     self.deck = dk
                     self.done = False
 
-                @discord.ui.button(label="Tirer", style=discord.ButtonStyle.primary)
+                @discord.ui.button(label="Tirer", style=discord.ButtonStyle.secondary)
                 async def hit(self, interaction, btn):
                     if interaction.user.id != self.ctx.author.id:
                         await interaction.response.send_message("Pas votre tour.", ephemeral=True)

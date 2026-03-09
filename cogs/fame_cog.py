@@ -99,8 +99,8 @@ class DuelView(View):
             await self.vote(interaction, 1)
         async def vote2_cb(interaction):
             await self.vote(interaction, 2)
-        btn1 = Button(label=f"Vote {user1.display_name[:15]}", style=discord.ButtonStyle.primary, emoji="1️⃣", custom_id="vote1")
-        btn2 = Button(label=f"Vote {user2.display_name[:15]}", style=discord.ButtonStyle.primary, emoji="2️⃣", custom_id="vote2")
+        btn1 = Button(label=f"Vote {user1.display_name[:15]}", style=discord.ButtonStyle.secondary, emoji="1️⃣", custom_id="vote1")
+        btn2 = Button(label=f"Vote {user2.display_name[:15]}", style=discord.ButtonStyle.secondary, emoji="2️⃣", custom_id="vote2")
         btn1.callback = vote1_cb
         btn2.callback = vote2_cb
         self.add_item(btn1)

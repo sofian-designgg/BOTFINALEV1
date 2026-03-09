@@ -25,7 +25,7 @@ def parse_duration(s: str) -> int:
 
 class GiveawayButton(Button):
     def __init__(self):
-        super().__init__(style=discord.ButtonStyle.primary, emoji="🎉", custom_id="giveaway_join")
+        super().__init__(style=discord.ButtonStyle.secondary, emoji="🎉", custom_id="giveaway_join")
 
     async def callback(self, interaction):
         await interaction.response.defer(ephemeral=True)
