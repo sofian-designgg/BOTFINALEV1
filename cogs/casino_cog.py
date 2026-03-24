@@ -206,7 +206,8 @@ def _casino_help_full_embeds(color: int) -> List[discord.Embed]:
         ("`+casinoset setchannel pfc [#salon]`", "Salon pour +casino pfc."),
         ("`+casinoset setchannel blackjack [#salon]`", "Salon pour +casino blackjack (alias accepté : `bj`)."),
         ("`+casinoset setchannel leaderboard [#salon]`", "Salon pour +casinolb et +casinostats. Alias : `lb`."),
-        ("`+casinoset setchannel trade [#salon]`", "Salon pour +trade."),
+        ("`+settradechannel [#salon]`", "Salon **uniquement** pour +trade (admin). Alias : `setchanneltrade`, `salontrade`. Sans salon = reset."),
+        ("`+casinoset setchannel trade [#salon]`", "Identique à +settradechannel."),
         ("`+casinoset setchannel global [#salon]`", "Même effet que +casinoset casinochannel."),
         ("`+casinoset setchannel encheres [#salon]`", "Même effet que +casinoset auctionchannel."),
         ("`+casinoset chslots [#salon]` … `chbj`", "Raccourcis identiques à setchannel (slots, flip, pfc, chbj, chleaderboard, chtrade)."),
@@ -230,6 +231,39 @@ class AuctionBidView(View):
         self.add_item(Button(label="+500", style=discord.ButtonStyle.primary, custom_id=f"auc:{auction_id}:500"))
         self.add_item(Button(label="+1000", style=discord.ButtonStyle.success, custom_id=f"auc:{auction_id}:1000"))
         self.add_item(Button(label="Achat immédiat", style=discord.ButtonStyle.danger, custom_id=f"auc:{auction_id}:buyout"))
+
+
+class AuctionJoinView(View):
+    """Bouton public : ajoute le membre au fil privé de l'enchère."""
+
+    def __init__(self, auction_id: str):
+        super().__init__(timeout=None)
+        self.add_item(
+            Button(
+                label="Rejoindre l'enchère (fil privé)",
+                style=discord.ButtonStyle.success,
+                custom_id=f"aucjoin:{auction_id}",
+            )
+        )
+
+
+async def _create_private_thread(channel: discord.abc.GuildChannel, name: str) -> discord.Thread:
+    """Crée un fil privé sous un salon texte (non invitable)."""
+    if not isinstance(channel, discord.TextChannel):
+        raise TypeError("Le salon doit être un salon texte pour créer un fil privé.")
+    return await channel.create_thread(
+        name=name[:100],
+        type=discord.ChannelType.private_thread,
+        invitable=False,
+        reason="Trade / enchère casino",
+    )
+
+
+async def _thread_add_user_safe(thread: discord.Thread, user: discord.abc.User) -> None:
+    try:
+        await thread.add_user(user)
+    except discord.HTTPException:
+        pass
 
 
 class CasinoConfigView(View):
@@ -359,7 +393,7 @@ class CasinoCog(commands.Cog):
         embed.add_field(
             name="⚙️ Salons distincts (admin)",
             value="**4 jeux** : `+casinoset setchannel slots|flip|pfc|blackjack #` (ou `chslots` … `chbj`)\n"
-            "**Leaderboard** : `setchannel leaderboard` (`chleaderboard`) · **Trade** : `setchannel trade` (`chtrade`)\n"
+            "**Leaderboard** : `setchannel leaderboard` (`chleaderboard`) · **Trade** : `+settradechannel #` ou `chtrade`\n"
             "**Enchères** : `setchannel encheres #` ou `auctionchannel` · **Fallback global** : `setchannel global` ou `casinochannel`\n"
             "`+casinoset resetchannels` — reset jeux+lb+trade (pas les enchères)",
             inline=False,
@@ -377,7 +411,7 @@ class CasinoCog(commands.Cog):
         )
         embed.add_field(
             name="🤝 Trade",
-            value="`+trade` — si `chtrade` est défini, uniquement dans ce salon.",
+            value="`+trade` — si un salon trade est défini (`+settradechannel` / `chtrade`), uniquement dans ce salon.",
             inline=False,
         )
         embed.set_footer(text="Liste exhaustive sans exception : +helpcasinocomplet · Tout le monde peut jouer si solde ≥ mise min.")
@@ -440,7 +474,7 @@ class CasinoCog(commands.Cog):
     async def casinoset(self, ctx):
         await ctx.send(embed=error_embed(
             "Casino",
-            "`setchannel` (slots flip pfc blackjack lb trade global encheres) · "
+            "`settradechannel` · `setchannel` (slots flip pfc blackjack lb trade global encheres) · "
             "`minbet` `maxbet` `cooldown` `daily` `fee` `auctionfee` `bidinc` `game` · "
             "`chslots` `chflip` `chpfc` `chbj` `chleaderboard` `chtrade` · "
             "`auctionchannel` `casinochannel` `resetcasinochannel` `resetchannels`",
@@ -899,6 +933,8 @@ class CasinoCog(commands.Cog):
             "channel_id": str(ch.id),
             "ends_at": ends,
             "status": "active",
+            "thread_id": None,
+            "join_message_id": None,
         })
         emb = discord.Embed(
             title=f"🏷️ Enchère — {role.name}",
@@ -908,10 +944,51 @@ class CasinoCog(commands.Cog):
             color=await get_guild_color(ctx.guild.id),
         )
         view = AuctionBidView(aid)
-        msg = await ch.send(embed=emb, view=view)
-        self.bot.add_view(view)
-        await col.update_one({"_id": aid}, {"$set": {"message_id": str(msg.id)}})
-        await ctx.send(embed=success_embed("Enchères", f"Vente créée dans {ch.mention}", await get_guild_color(ctx.guild.id)))
+        color = await get_guild_color(ctx.guild.id)
+        try:
+            tname = f"Enchère {role.name}"[:90]
+            thread = await _create_private_thread(ch, tname)
+            await _thread_add_user_safe(thread, ctx.author)
+            msg = await thread.send(embed=emb, view=view)
+            self.bot.add_view(view)
+            join_emb = discord.Embed(
+                title=f"🏷️ Enchère — {role.name}",
+                description=f"Fil **privé** : seuls les membres qui rejoignent peuvent voir les boutons d’enchère.\n"
+                f"Prix de départ : **{prix}** SayuCoins\n`ID: {aid}`",
+                color=color,
+            )
+            jv = AuctionJoinView(aid)
+            jmsg = await ch.send(embed=join_emb, view=jv)
+            self.bot.add_view(jv)
+            await col.update_one(
+                {"_id": aid},
+                {"$set": {
+                    "message_id": str(msg.id),
+                    "thread_id": str(thread.id),
+                    "join_message_id": str(jmsg.id),
+                }},
+            )
+            await ctx.send(
+                embed=success_embed(
+                    "Enchères",
+                    f"Vente dans le fil privé {thread.mention} — annonce + bouton **Rejoindre** dans {ch.mention}.",
+                    color,
+                )
+            )
+        except (TypeError, discord.HTTPException) as e:
+            msg = await ch.send(embed=emb, view=view)
+            self.bot.add_view(view)
+            await col.update_one({"_id": aid}, {"$set": {"message_id": str(msg.id)}})
+            hint = ""
+            if isinstance(e, discord.HTTPException):
+                hint = " (fil privé impossible — vérifie **Fils privés** du serveur et la permission **Gérer les fils** du bot)"
+            await ctx.send(
+                embed=success_embed(
+                    "Enchères",
+                    f"Vente créée dans {ch.mention} (mode salon public{hint}).",
+                    color,
+                )
+            )
 
     @commands.command(name="auctioncancel")
     async def auction_cancel(self, ctx, auction_id: str):
@@ -928,7 +1005,30 @@ class CasinoCog(commands.Cog):
         if str(ctx.author.id) != doc["seller_id"] and not ctx.author.guild_permissions.administrator:
             return await ctx.send(embed=error_embed("Enchères", "Pas votre enchère."))
         await col.update_one({"_id": auction_id}, {"$set": {"status": "cancelled"}})
+        tid = doc.get("thread_id")
+        if tid:
+            t = ctx.guild.get_thread(int(tid))
+            if t:
+                try:
+                    await t.edit(archived=True, locked=True)
+                except discord.HTTPException:
+                    pass
+        jmid = doc.get("join_message_id")
+        if jmid and ach:
+            parent = ctx.guild.get_channel(ach)
+            if isinstance(parent, discord.TextChannel):
+                try:
+                    jm = await parent.fetch_message(int(jmid))
+                    await jm.delete()
+                except Exception:
+                    pass
         await ctx.send(embed=success_embed("Enchères", "Enchère annulée.", await get_guild_color(ctx.guild.id)))
+
+    @commands.command(name="settradechannel", aliases=["setchanneltrade", "salontrade", "tradechannel"])
+    @commands.has_permissions(administrator=True)
+    async def settradechannel(self, ctx, channel: discord.TextChannel = None):
+        """Définit le salon où +trade est autorisé (sans salon = partout). Même effet que +casinoset chtrade."""
+        await self._set_ch(ctx, "channel_trade", channel)
 
     @commands.command(name="trade")
     async def trade(self, ctx, member: discord.Member, montant: int):
@@ -944,18 +1044,67 @@ class CasinoCog(commands.Cog):
         if bal < montant:
             return await ctx.send(embed=error_embed("Trade", "Solde insuffisant."))
         view = TradeMoneyView(ctx.guild.id, ctx.author.id, member.id, montant)
+        color = await get_guild_color(ctx.guild.id)
         emb = discord.Embed(
             title="🤝 Trade SayuCoins",
-            description=f"{ctx.author.mention} propose **{montant}** à {member.mention}",
-            color=await get_guild_color(ctx.guild.id),
+            description=f"{ctx.author.mention} propose **{montant}** à {member.mention}\n"
+            f"{member.mention} : **Accepter** ou **Refuser** ci-dessous.",
+            color=color,
         )
-        await ctx.send(member.mention, embed=emb, view=view)
+        try:
+            tname = f"Trade {ctx.author.display_name[:12]} ↔ {member.display_name[:12]}"
+            thread = await _create_private_thread(ctx.channel, tname)
+            await _thread_add_user_safe(thread, ctx.author)
+            await _thread_add_user_safe(thread, member)
+            await thread.send(content=f"{ctx.author.mention} {member.mention}", embed=emb, view=view)
+            await ctx.send(
+                embed=success_embed(
+                    "Trade",
+                    f"Proposition dans le fil privé {thread.mention}",
+                    color,
+                )
+            )
+        except (TypeError, discord.HTTPException):
+            await ctx.send(member.mention, embed=emb, view=view)
+            await ctx.send(
+                embed=error_embed(
+                    "Trade",
+                    "Impossible de créer un fil privé (salon **texte**, permission bot **Gérer les fils**, "
+                    "fils privés activés côté serveur). La proposition reste dans ce salon.",
+                )
+            )
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
         if interaction.type != InteractionType.component:
             return
         cid = interaction.data.get("custom_id") or ""
+        if cid.startswith("aucjoin:"):
+            if not interaction.guild:
+                return
+            aid = cid.split(":", 1)[1]
+            col = get_collection("role_auctions")
+            doc = await col.find_one({"_id": aid, "status": "active"}) if col is not None else None
+            if not doc or not doc.get("thread_id"):
+                await interaction.response.send_message("Enchère introuvable ou terminée.", ephemeral=True)
+                return
+            thread = interaction.guild.get_thread(int(doc["thread_id"]))
+            if not thread:
+                await interaction.response.send_message("Fil d’enchère introuvable (archivé ou supprimé).", ephemeral=True)
+                return
+            try:
+                await thread.add_user(interaction.user)
+            except discord.HTTPException:
+                await interaction.response.send_message(
+                    f"Tu es peut-être déjà dans le fil, ou l’ajout a échoué : {thread.mention}",
+                    ephemeral=True,
+                )
+                return
+            await interaction.response.send_message(
+                f"Tu as accès à l’enchère : {thread.mention}",
+                ephemeral=True,
+            )
+            return
         if not cid.startswith("auc:"):
             return
         parts = cid.split(":")
@@ -1021,3 +1170,5 @@ async def setup(bot):
             aid = doc.get("_id")
             if aid:
                 bot.add_view(AuctionBidView(str(aid)))
+                if doc.get("join_message_id"):
+                    bot.add_view(AuctionJoinView(str(aid)))
