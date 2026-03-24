@@ -88,6 +88,7 @@ async def load_extensions():
     """Charge tous les cogs"""
     cogs = [
         "cogs.config_cog",
+        "cogs.detail_cog",
         "cogs.database_cog",
         "cogs.moderation_cog",
         "cogs.xp_cog",

@@ -23,6 +23,9 @@ DEFAULT_GUILD_CONFIG = {
     "leave_msg": "{user} a quitté le serveur. 👋",
     "mute_role_id": None,
     "admin_role_id": None,
+    "rank_announce_channel_id": None,
+    "message_role_milestones": [],
+    "voice_role_milestones": [],
 }
 
 

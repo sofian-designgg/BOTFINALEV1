@@ -8,6 +8,7 @@ from discord.ext import commands
 from database import get_collection, is_connected
 from utils.embeds import success_embed, error_embed, get_progress_bar
 from utils.guild_config import get_guild_config, get_guild_color
+from utils.milestone_roles import apply_message_milestones
 
 
 def create_dark_chart(x_labels, y_values, title, color_hex="#8B5CF6"):
@@ -183,6 +184,7 @@ class StatsCog(commands.Cog):
                     {"$inc": {"count": 1}},
                     upsert=True
                 )
+                await apply_message_milestones(self.bot, message.author)
             except Exception:
                 pass
 

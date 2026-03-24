@@ -5,7 +5,7 @@ import random
 import time
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import List, Optional
 
 import discord
 from discord import InteractionType
@@ -18,7 +18,7 @@ from utils.guild_config import get_guild_config, get_guild_color
 from cogs.economy_cog import get_balance, add_coins, remove_coins
 
 DEFAULT_CASINO = {
-    "min_bet": 50,
+    "min_bet": 10,
     "max_bet": 50000,
     "cooldown_seconds": 15,
     "daily_game_limit": 80,
@@ -147,7 +147,7 @@ async def validate_bet(ctx, bet: int, game: str) -> Optional[str]:
         return f"Mise maximale : **{cfg['max_bet']}**"
     bal = await get_balance(ctx.guild.id, ctx.author.id)
     if bal < bet:
-        return f"Solde insuffisant (vous avez **{bal}**)."
+        return f"Pas assez de SayuCoins pour cette mise : il te faut **{bet}**, tu as **{bal}**. (Gagne des coins avec +daily, +weekly, messages, etc.)"
     ok_cd, left = await check_casino_cooldown(ctx.guild.id, ctx.author.id, game, cfg["cooldown_seconds"])
     if not ok_cd:
         return f"Cooldown : attendez **{left}s**."
@@ -166,6 +166,60 @@ async def take_house_fee(gross_win: int, fee_pct: int) -> int:
         return 0
     fee = int(gross_win * fee_pct / 100)
     return max(0, gross_win - fee)
+
+
+def _casino_help_full_embeds(color: int) -> List[discord.Embed]:
+    """Une entrée = une commande (ou alias), sans exception."""
+    lines_joueurs = [
+        ("`+helpcasino`", "Aide résumée. Alias : `+casinohelp`, `+aidecasino`."),
+        ("`+helpcasinocomplet`", "Liste **exhaustive** de toutes les commandes casino (ce guide). Alias : `+casinolist`, `+listecasino`."),
+        ("`+casinoconfig`", "Affiche la configuration casino (lecture seule, tout le monde)."),
+        ("`+casinolb`", "Top 10 des gains **nets** au casino. Alias : `+casinoleaderboard`."),
+        ("`+casinostats`", "Tes stats casino (misé, gagné, net, parties). `+casinostats @membre` pour un autre joueur."),
+        ("`+casino`", "Sans argument : rappel des sous-commandes de jeu."),
+        ("`+casino slots [mise]`", "Machine à sous. Tu paies la **mise** ; alignement = gain (taxe maison sur le gain)."),
+        ("`+casino flip [mise] [pile|face]`", "Pile ou face. Si tu gagnes, gain brut x2 puis taxe ; si tu perds, tu perds la mise."),
+        ("`+casino pfc [mise] [pierre|feuille|ciseaux]`", "Pierre-feuille-ciseaux vs le bot. Égalité = mise rendue ; victoire = gain avec taxe."),
+        ("`+casino blackjack [mise]`", "Blackjack avec boutons Tirer / Rester. Bust = perte de la mise ; victoire = gain net après taxe."),
+        ("`+sellrole @Rôle [prix_départ] [achat_immédiat]`", "Met un rôle aux enchères (tu dois le posséder). Frais de dépôt. Commande **dans le salon enchères**."),
+        ("`+auctioncancel [id]`", "Annule **ta** vente. Les admins peuvent annuler n’importe quelle enchère. Salon enchères si configuré."),
+        ("`+trade @membre [montant]`", "Propose un transfert de SayuCoins ; le destinataire accepte ou refuse (boutons)."),
+        ("**Qui peut jouer ?**", "Tout membre du serveur (avec licence bot active) peut utiliser les jeux **sans être staff**. Seules les mises comptent : si ton solde < mise min ou < mise choisie, le bot refuse."),
+    ]
+    lines_admin = [
+        ("`+casinopanel`", "Panneau admin avec boutons (rappels + ON/OFF casino). **Administrateur Discord** requis."),
+        ("`+casinoset`", "Groupe parent : affiche la liste des sous-commandes si tu ne mets pas d’argument."),
+        ("`+casinoset minbet [n]`", "Mise **minimum** (SayuCoins) pour jouer."),
+        ("`+casinoset maxbet [n]`", "Mise **maximum**."),
+        ("`+casinoset cooldown [secondes]`", "Temps d’attente entre deux parties **par jeu**."),
+        ("`+casinoset daily [n]`", "Nombre max de parties casino **par jour et par membre**."),
+        ("`+casinoset fee [0-50]`", "Pourcentage prélevé sur les **gains** (taxe maison)."),
+        ("`+casinoset auctionfee [0-30]`", "Pourcentage prélevé en **frais de dépôt** quand quelqu’un lance une vente avec +sellrole."),
+        ("`+casinoset bidinc [n]`", "Montant minimum ajouté par clic d’enchère (hors boutons fixes +100/+500/+1000)."),
+        ("`+casinoset auctionchannel #salon`", "Salon des **enchères** (+sellrole, +auctioncancel, messages d’enchère)."),
+        ("`+casinoset casinochannel #salon`", "Salon **global** de secours si un jeu n’a pas son propre salon."),
+        ("`+casinoset resetcasinochannel`", "Supprime le salon global (les jeux sans salon dédié = partout)."),
+        ("`+casinoset resetchannels`", "Remet à zéro **tous** les salons jeu + leaderboard + trade (pas les enchères)."),
+        ("`+casinoset setchannel …`", "Voir bloc suivant : **un salon par type**."),
+        ("`+casinoset setchannel slots [#salon]`", "Salon **uniquement** pour +casino slots. Sans # = reset."),
+        ("`+casinoset setchannel flip [#salon]`", "Salon pour +casino flip."),
+        ("`+casinoset setchannel pfc [#salon]`", "Salon pour +casino pfc."),
+        ("`+casinoset setchannel blackjack [#salon]`", "Salon pour +casino blackjack (alias accepté : `bj`)."),
+        ("`+casinoset setchannel leaderboard [#salon]`", "Salon pour +casinolb et +casinostats. Alias : `lb`."),
+        ("`+casinoset setchannel trade [#salon]`", "Salon pour +trade."),
+        ("`+casinoset setchannel global [#salon]`", "Même effet que +casinoset casinochannel."),
+        ("`+casinoset setchannel encheres [#salon]`", "Même effet que +casinoset auctionchannel."),
+        ("`+casinoset chslots [#salon]` … `chbj`", "Raccourcis identiques à setchannel (slots, flip, pfc, chbj, chleaderboard, chtrade)."),
+        ("`+casinoset game [slots|flip|pfc|blackjack] [on|off]`", "Active ou désactive un jeu."),
+    ]
+    emb1 = discord.Embed(title="📜 Liste complète — Joueurs", color=color)
+    emb1.description = "\n\n".join(f"**{cmd}**\n{desc}" for cmd, desc in lines_joueurs)
+    emb2 = discord.Embed(title="📜 Liste complète — Admin (1/2)", color=color)
+    half = len(lines_admin) // 2 + 1
+    emb2.description = "\n\n".join(f"**{cmd}**\n{desc}" for cmd, desc in lines_admin[:half])
+    emb3 = discord.Embed(title="📜 Liste complète — Admin (2/2)", color=color)
+    emb3.description = "\n\n".join(f"**{cmd}**\n{desc}" for cmd, desc in lines_admin[half:])
+    return [emb1, emb2, emb3]
 
 
 class AuctionBidView(View):
@@ -304,11 +358,10 @@ class CasinoCog(commands.Cog):
         )
         embed.add_field(
             name="⚙️ Salons distincts (admin)",
-            value="`+casinoset chslots #` · `chflip` · `chpfc` · `chbj` — un salon par jeu\n"
-            "`+casinoset chleaderboard #` — stats casino\n"
-            "`+casinoset chtrade #` — commande +trade\n"
-            "`+casinoset casinochannel #` — **fallback** si un jeu n’a pas de salon dédié\n"
-            "`+casinoset resetchannels` — tout en « partout » (sauf enchères)",
+            value="**4 jeux** : `+casinoset setchannel slots|flip|pfc|blackjack #` (ou `chslots` … `chbj`)\n"
+            "**Leaderboard** : `setchannel leaderboard` (`chleaderboard`) · **Trade** : `setchannel trade` (`chtrade`)\n"
+            "**Enchères** : `setchannel encheres #` ou `auctionchannel` · **Fallback global** : `setchannel global` ou `casinochannel`\n"
+            "`+casinoset resetchannels` — reset jeux+lb+trade (pas les enchères)",
             inline=False,
         )
         embed.add_field(
@@ -327,8 +380,14 @@ class CasinoCog(commands.Cog):
             value="`+trade` — si `chtrade` est défini, uniquement dans ce salon.",
             inline=False,
         )
-        embed.set_footer(text="Sans salon dédié = commande utilisable partout (sauf enchères = salon obligatoire si configuré).")
+        embed.set_footer(text="Liste exhaustive sans exception : +helpcasinocomplet · Tout le monde peut jouer si solde ≥ mise min.")
         await ctx.send(embed=embed)
+
+    @commands.command(name="helpcasinocomplet", aliases=["casinolist", "listecasino"])
+    async def helpcasinocomplet(self, ctx):
+        color = await get_guild_color(ctx.guild.id)
+        for emb in _casino_help_full_embeds(color):
+            await ctx.send(embed=emb)
 
     @commands.command(name="casinoconfig")
     async def casinoconfig(self, ctx):
@@ -381,9 +440,10 @@ class CasinoCog(commands.Cog):
     async def casinoset(self, ctx):
         await ctx.send(embed=error_embed(
             "Casino",
+            "`setchannel` (slots flip pfc blackjack lb trade global encheres) · "
             "`minbet` `maxbet` `cooldown` `daily` `fee` `auctionfee` `bidinc` `game` · "
-            "`chslots` `chflip` `chpfc` `chbj` `chleaderboard` `chtrade` `auctionchannel` `casinochannel` "
-            "`resetcasinochannel` `resetchannels`",
+            "`chslots` `chflip` `chpfc` `chbj` `chleaderboard` `chtrade` · "
+            "`auctionchannel` `casinochannel` `resetcasinochannel` `resetchannels`",
         ))
 
     @casinoset.command(name="minbet")
@@ -450,6 +510,59 @@ class CasinoCog(commands.Cog):
             "channel_trade": None,
         })
         await ctx.send(embed=success_embed("Casino", "Tous les salons **jeux / lb / trade** réinitialisés (partout). Les enchères ne sont pas touchées.", await get_guild_color(ctx.guild.id)))
+
+    @casinoset.group(name="setchannel", aliases=["setch", "ch"], invoke_without_command=True)
+    async def sc_setchannel(self, ctx):
+        if ctx.invoked_subcommand is None:
+            await ctx.send(embed=error_embed(
+                "Setchannel",
+                "Un salon **par type** (sans #salon = reset ce type) :\n"
+                "`slots` · `flip` · `pfc` · `blackjack` (alias `bj`) · `leaderboard` (alias `lb`) · "
+                "`trade` · `global` (fallback casino) · `encheres`\n"
+                "Ex. : `+casinoset setchannel slots #machine-a-sous`",
+            ))
+
+    @sc_setchannel.command(name="slots")
+    async def scsch_slots(self, ctx, channel: discord.TextChannel = None):
+        await self._set_ch(ctx, "channel_slots", channel)
+
+    @sc_setchannel.command(name="flip")
+    async def scsch_flip(self, ctx, channel: discord.TextChannel = None):
+        await self._set_ch(ctx, "channel_flip", channel)
+
+    @sc_setchannel.command(name="pfc")
+    async def scsch_pfc(self, ctx, channel: discord.TextChannel = None):
+        await self._set_ch(ctx, "channel_pfc", channel)
+
+    @sc_setchannel.command(name="blackjack", aliases=["bj"])
+    async def scsch_bj(self, ctx, channel: discord.TextChannel = None):
+        await self._set_ch(ctx, "channel_blackjack", channel)
+
+    @sc_setchannel.command(name="leaderboard", aliases=["lb"])
+    async def scsch_lb(self, ctx, channel: discord.TextChannel = None):
+        await self._set_ch(ctx, "channel_leaderboard", channel)
+
+    @sc_setchannel.command(name="trade")
+    async def scsch_trade(self, ctx, channel: discord.TextChannel = None):
+        await self._set_ch(ctx, "channel_trade", channel)
+
+    @sc_setchannel.command(name="global")
+    async def scsch_global(self, ctx, channel: discord.TextChannel = None):
+        await update_casino_config(ctx.guild.id, {"casino_channel_id": channel.id if channel else None})
+        col = await get_guild_color(ctx.guild.id)
+        if channel:
+            await ctx.send(embed=success_embed("Casino", f"Salon **global** (fallback) : {channel.mention}", col))
+        else:
+            await ctx.send(embed=success_embed("Casino", "Salon global désactivé.", col))
+
+    @sc_setchannel.command(name="encheres")
+    async def scsch_enc(self, ctx, channel: discord.TextChannel = None):
+        await update_casino_config(ctx.guild.id, {"auction_channel_id": channel.id if channel else None})
+        col = await get_guild_color(ctx.guild.id)
+        if channel:
+            await ctx.send(embed=success_embed("Casino", f"Salon **enchères** : {channel.mention}", col))
+        else:
+            await ctx.send(embed=success_embed("Casino", "Salon enchères désactivé.", col))
 
     async def _set_ch(self, ctx, key: str, channel: Optional[discord.TextChannel]):
         await update_casino_config(ctx.guild.id, {key: channel.id if channel else None})

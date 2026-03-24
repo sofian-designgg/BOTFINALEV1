@@ -88,6 +88,33 @@ class XPCog(commands.Cog):
             upsert=True
         )
 
+        old_level = level_from_xp(old_xp)
+        new_level = level_from_xp(new_xp)
+        if new_level > old_level:
+            cid = config.get("rank_announce_channel_id")
+            if cid:
+                ch = message.guild.get_channel(int(cid))
+                if isinstance(ch, discord.TextChannel):
+                    tmpl = config.get("level_up_msg") or "🎉 Félicitations {user} ! Niveau **{level}** !"
+                    try:
+                        txt = tmpl.format(
+                            user=message.author.mention,
+                            level=new_level,
+                            server=message.guild.name,
+                        )
+                    except Exception:
+                        txt = f"{message.author.mention} → niveau **{new_level}** !"
+                    try:
+                        await ch.send(
+                            embed=success_embed(
+                                "⬆️ Niveau obtenu !",
+                                txt,
+                                await get_guild_color(message.guild.id),
+                            )
+                        )
+                    except Exception:
+                        pass
+
     @commands.command(name="rank")
     async def rank(self, ctx, member: discord.Member = None):
         """Affiche le rang XP d'un membre (sans niveau ni rôles)"""

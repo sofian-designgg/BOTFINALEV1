@@ -7,6 +7,7 @@ from discord import app_commands
 from database import get_collection, is_connected
 from utils.embeds import success_embed, error_embed, info_embed, separator
 from utils.guild_config import get_guild_config, update_guild_config, get_guild_color, DEFAULT_GUILD_CONFIG
+from utils.milestone_roles import normalize_message_milestones, normalize_voice_milestones
 
 
 def hex_to_int(hex_str: str) -> int:
@@ -204,9 +205,151 @@ class ConfigCog(commands.Cog):
             embed.add_field(name="Bienvenue", value=f"<#{config.get('welcome_channel_id')}>" if config.get('welcome_channel_id') else "Non défini", inline=True)
             embed.add_field(name="Mute role", value=f"<@&{config.get('mute_role_id')}>" if config.get('mute_role_id') else "Non défini", inline=True)
             embed.add_field(name="Admin role", value=f"<@&{config.get('admin_role_id')}>" if config.get('admin_role_id') else "Non défini", inline=True)
+            rch = config.get("rank_announce_channel_id")
+            embed.add_field(
+                name="Annonces rangs (XP / messages / vocal)",
+                value=f"<#{rch}>" if rch else "Non défini (`+setrankchannel`)",
+                inline=False,
+            )
             embed.set_footer(text=separator())
 
             await ctx.send(embed=embed)
+        except Exception as e:
+            await ctx.send(embed=error_embed("Erreur", str(e)))
+
+    @commands.command(name="setrankchannel", aliases=["setrankannonce", "setlevelchannel"])
+    async def setrankchannel(self, ctx, channel: discord.TextChannel = None):
+        """Salon des annonces : niveau XP, paliers messages & vocal (+setrankchannel sans salon = désactiver)"""
+        try:
+            if not ctx.author.guild_permissions.administrator:
+                await ctx.send(embed=error_embed("Permissions", "Administrateur requis."))
+                return
+            await update_guild_config(ctx.guild.id, {"rank_announce_channel_id": channel.id if channel else None})
+            if channel:
+                await ctx.send(embed=success_embed("Annonces rangs", f"Salon : {channel.mention}", await get_guild_color(ctx.guild.id)))
+            else:
+                await ctx.send(embed=success_embed("Annonces rangs", "Annonces désactivées (aucun salon).", await get_guild_color(ctx.guild.id)))
+        except Exception as e:
+            await ctx.send(embed=error_embed("Erreur", str(e)))
+
+    @commands.command(name="setlevelupmsg")
+    async def setlevelupmsg(self, ctx, *, message: str):
+        """Message quand quelqu'un monte de niveau XP — variables : {user} {level} {server}"""
+        try:
+            if not ctx.author.guild_permissions.administrator:
+                await ctx.send(embed=error_embed("Permissions", "Administrateur requis."))
+                return
+            await update_guild_config(ctx.guild.id, {"level_up_msg": message[:1800]})
+            await ctx.send(embed=success_embed("Niveau XP", "Message de passage de niveau mis à jour.", await get_guild_color(ctx.guild.id)))
+        except Exception as e:
+            await ctx.send(embed=error_embed("Erreur", str(e)))
+
+    @commands.command(name="addmessagerole")
+    async def addmessagerole(self, ctx, role: discord.Role, messages: int):
+        """Attribue un rôle après X messages (total serveur, compteur stats)"""
+        try:
+            if not ctx.author.guild_permissions.administrator:
+                await ctx.send(embed=error_embed("Permissions", "Administrateur requis."))
+                return
+            messages = max(1, int(messages))
+            cfg = await get_guild_config(ctx.guild.id)
+            raw = list(cfg.get("message_role_milestones") or [])
+            raw = [x for x in raw if isinstance(x, dict) and int(x.get("role_id", 0)) != role.id]
+            raw.append({"role_id": role.id, "messages": messages})
+            await update_guild_config(ctx.guild.id, {"message_role_milestones": raw})
+            await ctx.send(embed=success_embed(
+                "Palier messages",
+                f"{role.mention} après **{messages:,}** messages (total). `+listmessageroles`",
+                await get_guild_color(ctx.guild.id),
+            ))
+        except Exception as e:
+            await ctx.send(embed=error_embed("Erreur", str(e)))
+
+    @commands.command(name="removemessagerole")
+    async def removemessagerole(self, ctx, role: discord.Role):
+        """Retire un palier messages"""
+        try:
+            if not ctx.author.guild_permissions.administrator:
+                await ctx.send(embed=error_embed("Permissions", "Administrateur requis."))
+                return
+            cfg = await get_guild_config(ctx.guild.id)
+            raw = [x for x in (cfg.get("message_role_milestones") or []) if isinstance(x, dict) and int(x.get("role_id", 0)) != role.id]
+            await update_guild_config(ctx.guild.id, {"message_role_milestones": raw})
+            await ctx.send(embed=success_embed("Palier messages", f"Palier retiré pour {role.mention}.", await get_guild_color(ctx.guild.id)))
+        except Exception as e:
+            await ctx.send(embed=error_embed("Erreur", str(e)))
+
+    @commands.command(name="listmessageroles")
+    async def listmessageroles(self, ctx):
+        """Liste les paliers messages"""
+        try:
+            cfg = await get_guild_config(ctx.guild.id)
+            ms = normalize_message_milestones(cfg.get("message_role_milestones"))
+            color = await get_guild_color(ctx.guild.id)
+            if not ms:
+                await ctx.send(embed=info_embed("Paliers messages", "Aucun. Utilise `+addmessagerole @Rôle [nombre]`."))
+                return
+            lines = []
+            for m in ms:
+                r = ctx.guild.get_role(m["role_id"])
+                lines.append(f"• **{m['messages']:,}** messages → {r.mention if r else m['role_id']}")
+            await ctx.send(embed=discord.Embed(title="💬 Paliers messages", description="\n".join(lines), color=color))
+        except Exception as e:
+            await ctx.send(embed=error_embed("Erreur", str(e)))
+
+    @commands.command(name="addvoicerole")
+    async def addvoicerole(self, ctx, role: discord.Role, minutes: int):
+        """Attribue un rôle après X minutes en vocal (total cumulé)"""
+        try:
+            if not ctx.author.guild_permissions.administrator:
+                await ctx.send(embed=error_embed("Permissions", "Administrateur requis."))
+                return
+            minutes = max(1, int(minutes))
+            cfg = await get_guild_config(ctx.guild.id)
+            raw = list(cfg.get("voice_role_milestones") or [])
+            raw = [x for x in raw if isinstance(x, dict) and int(x.get("role_id", 0)) != role.id]
+            raw.append({"role_id": role.id, "minutes": minutes})
+            await update_guild_config(ctx.guild.id, {"voice_role_milestones": raw})
+            await ctx.send(embed=success_embed(
+                "Palier vocal",
+                f"{role.mention} après **{minutes}** min en vocal (total). `+listvoiceroles`",
+                await get_guild_color(ctx.guild.id),
+            ))
+        except Exception as e:
+            await ctx.send(embed=error_embed("Erreur", str(e)))
+
+    @commands.command(name="removevoicerole")
+    async def removevoicerole(self, ctx, role: discord.Role):
+        """Retire un palier vocal"""
+        try:
+            if not ctx.author.guild_permissions.administrator:
+                await ctx.send(embed=error_embed("Permissions", "Administrateur requis."))
+                return
+            cfg = await get_guild_config(ctx.guild.id)
+            raw = [x for x in (cfg.get("voice_role_milestones") or []) if isinstance(x, dict) and int(x.get("role_id", 0)) != role.id]
+            await update_guild_config(ctx.guild.id, {"voice_role_milestones": raw})
+            await ctx.send(embed=success_embed("Palier vocal", f"Palier retiré pour {role.mention}.", await get_guild_color(ctx.guild.id)))
+        except Exception as e:
+            await ctx.send(embed=error_embed("Erreur", str(e)))
+
+    @commands.command(name="listvoiceroles")
+    async def listvoiceroles(self, ctx):
+        """Liste les paliers vocaux (minutes)"""
+        try:
+            cfg = await get_guild_config(ctx.guild.id)
+            ms = normalize_voice_milestones(cfg.get("voice_role_milestones"))
+            color = await get_guild_color(ctx.guild.id)
+            if not ms:
+                await ctx.send(embed=info_embed("Paliers vocaux", "Aucun. Utilise `+addvoicerole @Rôle [minutes]`."))
+                return
+            lines = []
+            for m in ms:
+                r = ctx.guild.get_role(m["role_id"])
+                h = m["minutes"] // 60
+                rest = m["minutes"] % 60
+                human = f"{m['minutes']} min" if h == 0 else f"{h}h{rest:02d} ({m['minutes']} min)"
+                lines.append(f"• **{human}** → {r.mention if r else m['role_id']}")
+            await ctx.send(embed=discord.Embed(title="🎤 Paliers vocaux", description="\n".join(lines), color=color))
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 

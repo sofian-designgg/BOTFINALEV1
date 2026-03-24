@@ -1,48 +1,17 @@
 """
-Cog Rôles vocaux - Rôles automatiques selon le temps passé en vocal
-3h, 5h, 10h avec commande pour voir son avancement
+Cog Rôles vocaux — paliers configurables par serveur (+addvoicerole, etc.)
 """
 import discord
 from discord.ext import commands
-from database import get_collection, is_connected
+from database import is_connected
 from utils.embeds import success_embed, error_embed
-from utils.guild_config import get_guild_color
+from utils.guild_config import get_guild_color, get_guild_config
 from utils.embeds import get_progress_bar
-
-VOICE_ROLES = [
-    (180, 1477766282299572254),   # 3h
-    (300, 1477763567167082506),   # 5h
-    (600, 1470854476859441242),   # 10h
-]
-
-
-async def get_total_voice_minutes(guild_id: str, user_id: str) -> int:
-    """Retourne le total de minutes vocales d'un utilisateur"""
-    col = get_collection("voice_stats")
-    if col is None:
-        return 0
-    pipeline = [
-        {"$match": {"guild_id": str(guild_id), "user_id": str(user_id)}},
-        {"$group": {"_id": None, "total": {"$sum": "$minutes"}}}
-    ]
-    async for doc in col.aggregate(pipeline):
-        return doc.get("total", 0)
-    return 0
-
-
-async def update_voice_roles(member: discord.Member, total_minutes: int) -> list:
-    """Assigne les rôles vocaux selon le total. Retourne la liste des rôles ajoutés."""
-    added = []
-    for min_required, role_id in VOICE_ROLES:
-        if total_minutes >= min_required:
-            role = member.guild.get_role(role_id)
-            if role and role not in member.roles:
-                try:
-                    await member.add_roles(role, reason="Temps vocal atteint")
-                    added.append(role.name)
-                except Exception:
-                    pass
-    return added
+from utils.milestone_roles import (
+    get_total_voice_minutes,
+    apply_voice_milestones,
+    normalize_voice_milestones,
+)
 
 
 class VoiceRolesCog(commands.Cog):
@@ -59,51 +28,54 @@ class VoiceRolesCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
-        """Vérifie et assigne les rôles après une sortie de vocal"""
+        """Après mise à jour du temps vocal (stats_cog), applique les rôles paliers."""
         if member.bot or not member.guild:
             return
         if not before.channel:
             return
-        total = await get_total_voice_minutes(str(member.guild.id), str(member.id))
-        added = await update_voice_roles(member, total)
-        if added:
-            try:
-                color = await get_guild_color(member.guild.id)
-                embed = success_embed(
-                    "🎤 Rôle vocal obtenu !",
-                    f"{member.mention} a débloqué : {', '.join(f'`{r}`' for r in added)}",
-                    color
-                )
-                await before.channel.send(embed=embed)
-            except Exception:
-                pass
+        await apply_voice_milestones(self.bot, member)
 
     @commands.command(name="voiceprogress", aliases=["vocalprogress", "vp"])
     async def voiceprogress(self, ctx, member: discord.Member = None):
-        """Affiche ton avancement vers les rôles vocaux (3h, 5h, 10h)"""
+        """Avancement vers les rôles vocaux (paliers définis par +addvoicerole)"""
         try:
             member = member or ctx.author
-            total_min = await get_total_voice_minutes(str(ctx.guild.id), str(member.id))
+            total_min = await get_total_voice_minutes(ctx.guild.id, member.id)
             total_h = total_min / 60
             color = await get_guild_color(ctx.guild.id)
+            conf = await get_guild_config(ctx.guild.id)
+            milestones = normalize_voice_milestones(conf.get("voice_role_milestones"))
+
+            if not milestones:
+                embed = discord.Embed(
+                    title=f"🎤 Avancement vocal — {member.display_name}",
+                    description="Aucun palier vocal configuré. Un admin peut utiliser `+addvoicerole @Rôle [minutes]` "
+                    "puis `+setrankchannel #salon` pour les annonces.",
+                    color=color,
+                )
+                embed.add_field(name="Temps total", value=f"**{total_h:.1f}h** ({total_min} min)", inline=False)
+                await ctx.send(embed=embed)
+                return
 
             lines = []
-            for min_req, role_id in VOICE_ROLES:
-                h_req = min_req / 60
-                role = ctx.guild.get_role(role_id)
-                role_name = role.name if role else f"Rôle {role_id}"
+            for m in milestones:
+                min_req = m["minutes"]
+                role = ctx.guild.get_role(m["role_id"])
+                role_name = role.name if role else f"Rôle {m['role_id']}"
                 has_role = role and role in member.roles
 
                 if total_min >= min_req:
-                    lines.append(f"✅ **{role_name}** ({int(h_req)}h) — Obtenu !")
+                    lines.append(f"✅ **{role_name}** ({min_req} min) — Obtenu !")
                 else:
-                    progress = total_min / min_req
+                    progress = total_min / min_req if min_req else 0
                     bar = get_progress_bar(total_min, min_req, 12)
                     restant = min_req - total_min
                     h_rest = int(restant // 60)
                     m_rest = int(restant % 60)
                     rest_str = f"{h_rest}h{m_rest:02d}" if h_rest else f"{m_rest}min"
-                    lines.append(f"⬜ **{role_name}** ({int(h_req)}h) — {bar} `{total_min}/{min_req}` min (encore {rest_str})")
+                    lines.append(
+                        f"⬜ **{role_name}** ({min_req} min) — {bar} `{total_min}/{min_req}` min (encore {rest_str})"
+                    )
 
             embed = discord.Embed(
                 title=f"🎤 Avancement vocal — {member.display_name}",
@@ -111,7 +83,7 @@ class VoiceRolesCog(commands.Cog):
                 color=color,
             )
             embed.set_thumbnail(url=member.display_avatar.url)
-            embed.set_footer(text="Gagne des rôles en passant du temps en vocal !")
+            embed.set_footer(text="Paliers : +addvoicerole @Rôle minutes · Annonces : +setrankchannel")
             await ctx.send(embed=embed)
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
