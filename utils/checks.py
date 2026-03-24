@@ -12,6 +12,7 @@ CONSULT_COMMANDS = {
     "fame", "fameleaderboard", "streak", "streakleaderboard",
     "invites", "inviteleaderboard", "mylink", "createinvite",
     "voiceprogress", "vocalprogress", "vp",
+    "help", "aide", "commandes", "cmds",
     "detail", "detailed", "aidecommande", "man",
     "listmessageroles", "listvoiceroles",
     "helpcasino", "casinohelp", "aidecasino",

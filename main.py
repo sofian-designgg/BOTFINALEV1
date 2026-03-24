@@ -61,7 +61,7 @@ async def before_command(ctx):
     """Vérification avant chaque commande"""
     if not ctx.command:
         return
-    if ctx.command.name == "redeem":
+    if ctx.command.name in ("redeem", "help"):
         return
     if ctx.guild:
         # Vérification licence
@@ -88,6 +88,7 @@ async def load_extensions():
     """Charge tous les cogs"""
     cogs = [
         "cogs.config_cog",
+        "cogs.help_cog",
         "cogs.detail_cog",
         "cogs.database_cog",
         "cogs.moderation_cog",
