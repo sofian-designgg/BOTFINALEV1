@@ -33,7 +33,7 @@ DEFAULT_CASINO = {
     "channel_trade": None,
     "enabled": True,
     "games": {"slots": True, "flip": True, "blackjack": True, "pfc": True},
-    "auction_fee_percent": 3,
+    "auction_fee_percent": 0,
     "bid_increment_min": 100,
 }
 
@@ -181,7 +181,7 @@ def _casino_help_full_embeds(color: int) -> List[discord.Embed]:
         ("`+casino flip [mise] [pile|face]`", "Pile ou face. Si tu gagnes, gain brut x2 puis taxe ; si tu perds, tu perds la mise."),
         ("`+casino pfc [mise] [pierre|feuille|ciseaux]`", "Pierre-feuille-ciseaux vs le bot. Égalité = mise rendue ; victoire = gain avec taxe."),
         ("`+casino blackjack [mise]`", "Blackjack avec boutons Tirer / Rester. Bust = perte de la mise ; victoire = gain net après taxe."),
-        ("`+sellrole @Rôle [prix_départ] [achat_immédiat]`", "Met un rôle aux enchères (tu dois le posséder). Frais de dépôt. Commande **dans le salon enchères**."),
+        ("`+sellrole @Rôle [prix_départ] [achat_immédiat]`", "Met un rôle aux enchères (tu dois le posséder). **Sans frais de dépôt** par défaut. Commande **dans le salon enchères**."),
         ("`+auctioncancel [id]`", "Annule **ta** vente. Les admins peuvent annuler n’importe quelle enchère. Salon enchères si configuré."),
         ("`+trade @membre [montant]`", "Propose un transfert de SayuCoins ; le destinataire accepte ou refuse (boutons)."),
         ("**Qui peut jouer ?**", "Tout membre du serveur (avec licence bot active) peut utiliser les jeux **sans être staff**. Seules les mises comptent : si ton solde < mise min ou < mise choisie, le bot refuse."),
@@ -194,7 +194,7 @@ def _casino_help_full_embeds(color: int) -> List[discord.Embed]:
         ("`+casinoset cooldown [secondes]`", "Temps d’attente entre deux parties **par jeu**."),
         ("`+casinoset daily [n]`", "Nombre max de parties casino **par jour et par membre**."),
         ("`+casinoset fee [0-50]`", "Pourcentage prélevé sur les **gains** (taxe maison)."),
-        ("`+casinoset auctionfee [0-30]`", "Pourcentage prélevé en **frais de dépôt** quand quelqu’un lance une vente avec +sellrole."),
+        ("`+casinoset auctionfee [0-30]`", "Frais de dépôt sur +sellrole (**0** par défaut = aucun prélèvement)."),
         ("`+casinoset bidinc [n]`", "Montant minimum ajouté par clic d’enchère (hors boutons fixes +100/+500/+1000)."),
         ("`+casinoset auctionchannel #salon`", "Salon des **enchères** (+sellrole, +auctioncancel, messages d’enchère)."),
         ("`+casinoset casinochannel #salon`", "Salon **global** de secours si un jeu n’a pas son propre salon."),
@@ -281,7 +281,7 @@ class CasinoConfigView(View):
             "**Réglages rapides (tapez dans le salon) :**\n"
             "`+casinoset minbet 50` · `+casinoset maxbet 50000`\n"
             "`+casinoset cooldown 15` · `+casinoset daily 80`\n"
-            "`+casinoset fee 5` · `+casinoset auctionfee 3`\n"
+            "`+casinoset fee 5` · `+casinoset auctionfee 0` (dépôt enchère, 0 = off)\n"
             "`+casinoset bidinc 100`\n"
             "`+casinoset auctionchannel #salon` · `chslots` `chflip` `chpfc` `chbj` `chleaderboard` `chtrade`\n"
             "`+casinoset casinochannel` · `resetcasinochannel` · `resetchannels`\n"
@@ -441,7 +441,7 @@ class CasinoCog(commands.Cog):
         embed.add_field(name="Cooldown", value=f"{cfg['cooldown_seconds']} s", inline=True)
         embed.add_field(name="Parties / jour / membre", value=str(cfg["daily_game_limit"]), inline=True)
         embed.add_field(name="Taxe gains", value=f"{cfg['house_fee_percent']} %", inline=True)
-        embed.add_field(name="Frais vente enchère", value=f"{cfg.get('auction_fee_percent', 3)} %", inline=True)
+        embed.add_field(name="Frais dépôt enchère (+sellrole)", value=f"{cfg.get('auction_fee_percent', 0)} % (0 = gratuit)", inline=True)
         embed.add_field(
             name="🎮 Salons par jeu",
             value=f"Slots: {mch('channel_slots')}\nFlip: {mch('channel_flip')}\nPFC: {mch('channel_pfc')}\nBJ: {mch('channel_blackjack')}\n"
@@ -915,9 +915,9 @@ class CasinoCog(commands.Cog):
             return await ctx.send(embed=error_embed("Enchères", "Vous devez **posséder** le rôle pour le vendre."))
         if prix < 1:
             return await ctx.send(embed=error_embed("Enchères", "Prix invalide."))
-        fee_pct = cfg.get("auction_fee_percent", 3)
-        fee = max(1, int(prix * fee_pct / 100))
-        if not await remove_coins(ctx.guild.id, ctx.author.id, fee):
+        fee_pct = max(0, min(30, int(cfg.get("auction_fee_percent", 0))))
+        fee = int(prix * fee_pct / 100) if fee_pct else 0
+        if fee > 0 and not await remove_coins(ctx.guild.id, ctx.author.id, fee):
             return await ctx.send(embed=error_embed("Enchères", f"Frais de dépôt : **{fee}** SayuCoins requis."))
         aid = str(uuid.uuid4())[:12]
         col = get_collection("role_auctions")
