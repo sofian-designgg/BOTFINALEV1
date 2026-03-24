@@ -100,18 +100,6 @@ class ConfigCog(commands.Cog):
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
-    @commands.command(name="setlevelupmsg")
-    async def setlevelupmsg(self, ctx, *, message: str):
-        """Personnalise le message de level-up ({user}, {level})"""
-        try:
-            if not ctx.author.guild_permissions.administrator:
-                await ctx.send(embed=error_embed("Permissions", "Administrateur requis."))
-                return
-            await update_guild_config(ctx.guild.id, {"level_up_msg": message})
-            await ctx.send(embed=success_embed("Message level-up", "Message mis à jour.", await get_guild_color(ctx.guild.id)))
-        except Exception as e:
-            await ctx.send(embed=error_embed("Erreur", str(e)))
-
     @commands.command(name="setlogchannel")
     async def setlogchannel(self, ctx, channel: discord.TextChannel):
         """Définit le salon des logs de modération"""

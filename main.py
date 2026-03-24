@@ -75,7 +75,8 @@ async def before_command(ctx):
             await ctx.send(embed=embed)
             raise commands.CheckFailure("No license")
         # Restriction : seuls consultation + invites pour les non-staff
-        allowed, err_msg = await can_use_command(ctx, ctx.command.name)
+        cmd_key = ctx.command.qualified_name
+        allowed, err_msg = await can_use_command(ctx, cmd_key)
         if not allowed:
             from utils.embeds import error_embed
             embed = error_embed("Accès refusé", err_msg)
@@ -102,6 +103,7 @@ async def load_extensions():
         "cogs.invites_cog",
         "cogs.welcome_cog",
         "cogs.voice_roles_cog",
+        "cogs.casino_cog",
     ]
     for cog in cogs:
         try:

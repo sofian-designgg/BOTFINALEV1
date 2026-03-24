@@ -73,7 +73,7 @@ def build_duel_embed(member: discord.Member, stats: dict, votes: int, color: int
     embed.set_image(url=member.display_avatar.url)
     embed.add_field(name="👑 Rôle", value=stats["role"], inline=True)
     embed.add_field(name=f"{stats['currency_emoji']} Argent", value=f"{stats['money']:,} {stats['currency_name']}", inline=True)
-    embed.add_field(name="⭐ Niveau", value=f"Niv. {stats['level']} ({stats['xp']:,} XP)", inline=True)
+    embed.add_field(name="⭐ XP", value=f"{stats['xp']:,}", inline=True)
     embed.add_field(name="💮 Réputation", value=str(stats["fame"]), inline=True)
     embed.add_field(name="💬 Messages", value=f"{stats['messages']:,}", inline=True)
     embed.add_field(name="🔊 Vocal", value=f"{stats['vocal_min']} min", inline=True)

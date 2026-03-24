@@ -12,6 +12,10 @@ CONSULT_COMMANDS = {
     "fame", "fameleaderboard", "streak", "streakleaderboard",
     "invites", "inviteleaderboard", "mylink", "createinvite",
     "voiceprogress", "vocalprogress", "vp",
+    "helpcasino", "casinohelp", "aidecasino",
+    "casinoconfig", "casinolb", "casinoleaderboard",
+    "casinostats", "casino", "trade", "sellrole", "auctioncancel",
+    "casino slots", "casino flip", "casino pfc", "casino blackjack",
     "shop", "inventory", "glist",
     "settings", "ping", "licenceinfo", "redeem",
     # Modération view only
