@@ -25,11 +25,39 @@ DEFAULT_CASINO = {
     "house_fee_percent": 5,
     "auction_channel_id": None,
     "casino_channel_id": None,
+    "channel_slots": None,
+    "channel_flip": None,
+    "channel_pfc": None,
+    "channel_blackjack": None,
+    "channel_leaderboard": None,
+    "channel_trade": None,
     "enabled": True,
     "games": {"slots": True, "flip": True, "blackjack": True, "pfc": True},
     "auction_fee_percent": 3,
     "bid_increment_min": 100,
 }
+
+
+def _channel_for_game(cfg: dict, game: str) -> Optional[int]:
+    """Salon pour un jeu : spécifique → sinon salon casino global → sinon partout (None)."""
+    key = {"slots": "channel_slots", "flip": "channel_flip", "pfc": "channel_pfc", "blackjack": "channel_blackjack"}.get(game)
+    if not key:
+        return cfg.get("casino_channel_id")
+    cid = cfg.get(key)
+    if cid:
+        return cid
+    return cfg.get("casino_channel_id")
+
+
+async def _must_be_channel(ctx, cfg: dict, channel_key: str) -> Optional[str]:
+    """Si channel_key est défini, la commande doit être utilisée dans ce salon."""
+    cid = cfg.get(channel_key)
+    if not cid:
+        return None
+    if ctx.channel.id != cid:
+        ch = ctx.guild.get_channel(cid)
+        return f"Utilisez ce salon : {ch.mention}." if ch else "Salon casino non configuré."
+    return None
 
 
 async def get_casino_config(gid: int) -> dict:
@@ -107,9 +135,10 @@ async def validate_bet(ctx, bet: int, game: str) -> Optional[str]:
     cfg = await get_casino_config(ctx.guild.id)
     if not cfg.get("enabled", True):
         return "Le casino est désactivé sur ce serveur."
-    if cfg.get("casino_channel_id") and ctx.channel.id != cfg["casino_channel_id"]:
-        ch = ctx.guild.get_channel(cfg["casino_channel_id"])
-        return f"Jouez dans {ch.mention}." if ch else "Salon casino non configuré."
+    need = _channel_for_game(cfg, game)
+    if need and ctx.channel.id != need:
+        ch = ctx.guild.get_channel(need)
+        return f"Jouez à **{game}** dans {ch.mention}." if ch else "Salon jeu non configuré."
     if not cfg.get("games", {}).get(game, True):
         return "Ce jeu est désactivé."
     if bet < cfg["min_bet"]:
@@ -166,7 +195,8 @@ class CasinoConfigView(View):
             "`+casinoset cooldown 15` · `+casinoset daily 80`\n"
             "`+casinoset fee 5` · `+casinoset auctionfee 3`\n"
             "`+casinoset bidinc 100`\n"
-            "`+casinoset auctionchannel #salon` · `+casinoset casinochannel #salon` · `+casinoset resetcasinochannel`\n"
+            "`+casinoset auctionchannel #salon` · `chslots` `chflip` `chpfc` `chbj` `chleaderboard` `chtrade`\n"
+            "`+casinoset casinochannel` · `resetcasinochannel` · `resetchannels`\n"
             "`+casinoset game slots on` · `flip off` …\n"
             "`+casinoconfig` — lire la config"
         )
@@ -268,35 +298,46 @@ class CasinoCog(commands.Cog):
         )
         embed.add_field(
             name="📊 Stats",
-            value="`+casinolb` — Top 10 net (gains - mises enregistrés)\n`+casinostats [@membre]` — Détail perso",
+            value="`+casinolb` — Top 10 net\n`+casinostats` — Détail perso\n"
+            "(Si `chleaderboard` est défini, ces commandes ne sont utilisables que dans ce salon.)",
+            inline=False,
+        )
+        embed.add_field(
+            name="⚙️ Salons distincts (admin)",
+            value="`+casinoset chslots #` · `chflip` · `chpfc` · `chbj` — un salon par jeu\n"
+            "`+casinoset chleaderboard #` — stats casino\n"
+            "`+casinoset chtrade #` — commande +trade\n"
+            "`+casinoset casinochannel #` — **fallback** si un jeu n’a pas de salon dédié\n"
+            "`+casinoset resetchannels` — tout en « partout » (sauf enchères)",
             inline=False,
         )
         embed.add_field(
             name="⚙️ Config (admin)",
-            value="`+casinopanel` — Boutons : aide commandes, ON/OFF, rappels salons & taxes\n"
-            "`+casinoconfig` — Afficher toute la config\n"
-            "`+casinoset` — minbet, maxbet, cooldown, daily, fee, auctionfee, bidinc, auctionchannel, casinochannel, game …",
+            value="`+casinopanel` · `+casinoconfig` · `+casinoset` minbet, maxbet, cooldown, daily, fee, auctionchannel, game …",
             inline=False,
         )
         embed.add_field(
             name="🏷️ Enchères de rôles",
-            value="`+sellrole @Rôle [prix_départ] [prix_achat_immédiat]` — Liste une vente (frais de dépôt). "
-            "Boutons +100 / +500 / +1000 / achat immédiat. L’enchérisseur précédent est remboursé.\n"
-            "`+auctioncancel [id]` — Annuler ta vente (admin : toutes)",
+            value="`+sellrole` et `+auctioncancel` dans le salon **enchères** (`+casinoset auctionchannel`). "
+            "Boutons +100 / +500 / +1000 / achat immédiat.",
             inline=False,
         )
         embed.add_field(
             name="🤝 Trade",
-            value="`+trade @membre [montant]` — Transfert proposé (boutons Accepter / Refuser)",
+            value="`+trade` — si `chtrade` est défini, uniquement dans ce salon.",
             inline=False,
         )
-        embed.set_footer(text="Économie : daily, weekly, messages… puis casino. Configurez auctionchannel pour les ventes.")
+        embed.set_footer(text="Sans salon dédié = commande utilisable partout (sauf enchères = salon obligatoire si configuré).")
         await ctx.send(embed=embed)
 
     @commands.command(name="casinoconfig")
     async def casinoconfig(self, ctx):
         cfg = await get_casino_config(ctx.guild.id)
         color = await get_guild_color(ctx.guild.id)
+        def mch(k):
+            c = ctx.guild.get_channel(cfg.get(k)) if cfg.get(k) else None
+            return c.mention if c else "— (partout)"
+
         ch_c = ctx.guild.get_channel(cfg["casino_channel_id"]) if cfg.get("casino_channel_id") else None
         ch_a = ctx.guild.get_channel(cfg["auction_channel_id"]) if cfg.get("auction_channel_id") else None
         games = cfg.get("games", {})
@@ -308,9 +349,16 @@ class CasinoCog(commands.Cog):
         embed.add_field(name="Parties / jour / membre", value=str(cfg["daily_game_limit"]), inline=True)
         embed.add_field(name="Taxe gains", value=f"{cfg['house_fee_percent']} %", inline=True)
         embed.add_field(name="Frais vente enchère", value=f"{cfg.get('auction_fee_percent', 3)} %", inline=True)
-        embed.add_field(name="Salon casino", value=ch_c.mention if ch_c else "Partout", inline=False)
-        embed.add_field(name="Salon enchères", value=ch_a.mention if ch_a else "Non défini", inline=False)
-        embed.add_field(name="Jeux", value=gtxt, inline=False)
+        embed.add_field(
+            name="🎮 Salons par jeu",
+            value=f"Slots: {mch('channel_slots')}\nFlip: {mch('channel_flip')}\nPFC: {mch('channel_pfc')}\nBJ: {mch('channel_blackjack')}\n"
+            f"_Fallback global_: {ch_c.mention if ch_c else '—'}",
+            inline=False,
+        )
+        embed.add_field(name="📊 Leaderboard (+casinolb)", value=mch("channel_leaderboard"), inline=True)
+        embed.add_field(name="🤝 Trade (+trade)", value=mch("channel_trade"), inline=True)
+        embed.add_field(name="🏷️ Enchères (+sellrole)", value=ch_a.mention if ch_a else "Non défini", inline=True)
+        embed.add_field(name="Jeux ON/OFF", value=gtxt, inline=False)
         await ctx.send(embed=embed)
 
     @commands.command(name="casinopanel")
@@ -331,7 +379,12 @@ class CasinoCog(commands.Cog):
     @commands.group(name="casinoset", invoke_without_command=True)
     @commands.has_permissions(administrator=True)
     async def casinoset(self, ctx):
-        await ctx.send(embed=error_embed("Casino", "Sous-commandes : `minbet` `maxbet` `cooldown` `daily` `fee` `auctionfee` `bidinc` `auctionchannel` `casinochannel` `game`"))
+        await ctx.send(embed=error_embed(
+            "Casino",
+            "`minbet` `maxbet` `cooldown` `daily` `fee` `auctionfee` `bidinc` `game` · "
+            "`chslots` `chflip` `chpfc` `chbj` `chleaderboard` `chtrade` `auctionchannel` `casinochannel` "
+            "`resetcasinochannel` `resetchannels`",
+        ))
 
     @casinoset.command(name="minbet")
     async def cs_minbet(self, ctx, n: int):
@@ -383,7 +436,52 @@ class CasinoCog(commands.Cog):
     @casinoset.command(name="resetcasinochannel")
     async def cs_casch_reset(self, ctx):
         await update_casino_config(ctx.guild.id, {"casino_channel_id": None})
-        await ctx.send(embed=success_embed("Casino", "Jeux autorisés **partout**.", await get_guild_color(ctx.guild.id)))
+        await ctx.send(embed=success_embed("Casino", "Salon casino **global** désactivé (jeux partout si pas de salon par jeu).", await get_guild_color(ctx.guild.id)))
+
+    @casinoset.command(name="resetchannels")
+    async def cs_resetchannels(self, ctx):
+        await update_casino_config(ctx.guild.id, {
+            "casino_channel_id": None,
+            "channel_slots": None,
+            "channel_flip": None,
+            "channel_pfc": None,
+            "channel_blackjack": None,
+            "channel_leaderboard": None,
+            "channel_trade": None,
+        })
+        await ctx.send(embed=success_embed("Casino", "Tous les salons **jeux / lb / trade** réinitialisés (partout). Les enchères ne sont pas touchées.", await get_guild_color(ctx.guild.id)))
+
+    async def _set_ch(self, ctx, key: str, channel: Optional[discord.TextChannel]):
+        await update_casino_config(ctx.guild.id, {key: channel.id if channel else None})
+        if channel:
+            await ctx.send(embed=success_embed("Casino", f"{key} → {channel.mention}", await get_guild_color(ctx.guild.id)))
+        else:
+            await ctx.send(embed=success_embed("Casino", f"{key} désactivé (partout ou fallback).", await get_guild_color(ctx.guild.id)))
+
+    @casinoset.command(name="chslots")
+    async def cs_chslots(self, ctx, channel: discord.TextChannel = None):
+        """Salon dédié +casino slots (sans salon = reset ce jeu)"""
+        await self._set_ch(ctx, "channel_slots", channel)
+
+    @casinoset.command(name="chflip")
+    async def cs_chflip(self, ctx, channel: discord.TextChannel = None):
+        await self._set_ch(ctx, "channel_flip", channel)
+
+    @casinoset.command(name="chpfc")
+    async def cs_chpfc(self, ctx, channel: discord.TextChannel = None):
+        await self._set_ch(ctx, "channel_pfc", channel)
+
+    @casinoset.command(name="chbj")
+    async def cs_chbj(self, ctx, channel: discord.TextChannel = None):
+        await self._set_ch(ctx, "channel_blackjack", channel)
+
+    @casinoset.command(name="chleaderboard")
+    async def cs_chlb(self, ctx, channel: discord.TextChannel = None):
+        await self._set_ch(ctx, "channel_leaderboard", channel)
+
+    @casinoset.command(name="chtrade")
+    async def cs_chtrade(self, ctx, channel: discord.TextChannel = None):
+        await self._set_ch(ctx, "channel_trade", channel)
 
     @casinoset.command(name="game")
     async def cs_game(self, ctx, name: str, state: str):
@@ -399,6 +497,10 @@ class CasinoCog(commands.Cog):
 
     @commands.command(name="casinolb", aliases=["casinoleaderboard"])
     async def casinolb(self, ctx):
+        cfg = await get_casino_config(ctx.guild.id)
+        err = await _must_be_channel(ctx, cfg, "channel_leaderboard")
+        if err:
+            return await ctx.send(embed=error_embed("Casino", err))
         col = get_collection("casino_stats")
         if col is None:
             return await ctx.send(embed=error_embed("DB", "Erreur."))
@@ -426,6 +528,10 @@ class CasinoCog(commands.Cog):
 
     @commands.command(name="casinostats")
     async def casinostats(self, ctx, member: discord.Member = None):
+        cfg = await get_casino_config(ctx.guild.id)
+        err = await _must_be_channel(ctx, cfg, "channel_leaderboard")
+        if err:
+            return await ctx.send(embed=error_embed("Casino", err))
         member = member or ctx.author
         col = get_collection("casino_stats")
         if col is None:
@@ -652,6 +758,8 @@ class CasinoCog(commands.Cog):
         ch = ctx.guild.get_channel(ach)
         if not ch:
             return await ctx.send(embed=error_embed("Enchères", "Salon enchères introuvable."))
+        if ctx.channel.id != ach:
+            return await ctx.send(embed=error_embed("Enchères", f"Utilisez la commande dans {ch.mention}."))
         if role >= ctx.guild.me.top_role:
             return await ctx.send(embed=error_embed("Enchères", "Le bot ne peut pas gérer ce rôle."))
         if role.managed:
@@ -694,6 +802,12 @@ class CasinoCog(commands.Cog):
 
     @commands.command(name="auctioncancel")
     async def auction_cancel(self, ctx, auction_id: str):
+        cfg = await get_casino_config(ctx.guild.id)
+        ach = cfg.get("auction_channel_id")
+        if ach and ctx.channel.id != ach:
+            ch = ctx.guild.get_channel(ach)
+            if ch:
+                return await ctx.send(embed=error_embed("Enchères", f"Utilisez {ch.mention}."))
         col = get_collection("role_auctions")
         doc = await col.find_one({"_id": auction_id, "guild_id": str(ctx.guild.id)})
         if not doc:
@@ -705,6 +819,10 @@ class CasinoCog(commands.Cog):
 
     @commands.command(name="trade")
     async def trade(self, ctx, member: discord.Member, montant: int):
+        cfg = await get_casino_config(ctx.guild.id)
+        err = await _must_be_channel(ctx, cfg, "channel_trade")
+        if err:
+            return await ctx.send(embed=error_embed("Casino", err))
         if member.bot or member.id == ctx.author.id:
             return await ctx.send(embed=error_embed("Trade", "Membre invalide."))
         if montant < 1:
