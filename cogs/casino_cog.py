@@ -8,9 +8,9 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
 import discord
-from discord import InteractionType
+from discord import InteractionType, SelectOption
 from discord.ext import commands
-from discord.ui import Button, View
+from discord.ui import Button, View, Select
 
 from database import get_collection, is_connected
 from utils.embeds import success_embed, error_embed
@@ -183,7 +183,7 @@ def _casino_help_full_embeds(color: int) -> List[discord.Embed]:
         ("`+casino blackjack [mise]`", "Blackjack avec boutons Tirer / Rester. Bust = perte de la mise ; victoire = gain net après taxe."),
         ("`+sellrole @Rôle [prix_départ] [achat_immédiat]`", "Met un rôle aux enchères (tu dois le posséder). **Sans frais de dépôt** par défaut. Commande **dans le salon enchères**."),
         ("`+auctioncancel [id]`", "Annule **ta** vente. Les admins peuvent annuler n’importe quelle enchère. Salon enchères si configuré."),
-        ("`+trade @membre [montant]`", "Propose un transfert de SayuCoins ; le destinataire accepte ou refuse (boutons)."),
+        ("`+trade @Rôle *message*`", "Tu cherches un rôle : annonce + **un seul** partenaire répond ; fil privé, choix des rôles, double confirmation. `+tradecancel [id]` (auteur)."),
         ("**Qui peut jouer ?**", "Tout membre du serveur (avec licence bot active) peut utiliser les jeux **sans être staff**. Seules les mises comptent : si ton solde < mise min ou < mise choisie, le bot refuse."),
     ]
     lines_admin = [
@@ -230,7 +230,6 @@ class AuctionBidView(View):
         self.add_item(Button(label="+100", style=discord.ButtonStyle.primary, custom_id=f"auc:{auction_id}:100"))
         self.add_item(Button(label="+500", style=discord.ButtonStyle.primary, custom_id=f"auc:{auction_id}:500"))
         self.add_item(Button(label="+1000", style=discord.ButtonStyle.success, custom_id=f"auc:{auction_id}:1000"))
-        self.add_item(Button(label="Achat immédiat", style=discord.ButtonStyle.danger, custom_id=f"auc:{auction_id}:buyout"))
 
 
 class AuctionJoinView(View):
@@ -264,6 +263,110 @@ async def _thread_add_user_safe(thread: discord.Thread, user: discord.abc.User) 
         await thread.add_user(user)
     except discord.HTTPException:
         pass
+
+
+def _tradable_roles(member: discord.Member, bot_me: discord.Member) -> List[discord.Role]:
+    roles = []
+    for r in member.roles:
+        if r.is_default():
+            continue
+        if r.managed:
+            continue
+        if r >= bot_me.top_role:
+            continue
+        roles.append(r)
+    roles.sort(key=lambda x: x.position, reverse=True)
+    return roles[:25]
+
+
+class TradeOpenView(View):
+    """Un seul membre peut répondre (premier cliqué)."""
+
+    def __init__(self, trade_id: str):
+        super().__init__(timeout=None)
+        tid = trade_id
+        btn = Button(
+            label="Je réponds au trade (1 place)",
+            style=discord.ButtonStyle.success,
+            custom_id=f"rtclaim:{tid}",
+        )
+
+        async def cb(interaction: discord.Interaction):
+            cog = interaction.client.get_cog("CasinoCog")
+            if cog:
+                await cog._handle_rtclaim(interaction, tid)
+            elif not interaction.response.is_done():
+                await interaction.response.send_message("Erreur interne.", ephemeral=True)
+
+        btn.callback = cb
+        self.add_item(btn)
+
+
+class TradeFinalView(View):
+    """Double validation avant échange de rôles."""
+
+    def __init__(self, trade_id: str):
+        super().__init__(timeout=None)
+        tid = trade_id
+        for label, side in [
+            ("✅ Confirmer (auteur du trade)", "author"),
+            ("✅ Confirmer (partenaire)", "claimer"),
+        ]:
+            b = Button(
+                label=label,
+                style=discord.ButtonStyle.success,
+                custom_id=f"rtconf:{tid}:{side}",
+                row=0,
+            )
+
+            async def cb(interaction: discord.Interaction, *, s=side):
+                cog = interaction.client.get_cog("CasinoCog")
+                if cog:
+                    await cog._handle_rtconf(interaction, tid, s)
+                elif not interaction.response.is_done():
+                    await interaction.response.send_message("Erreur interne.", ephemeral=True)
+
+            b.callback = cb
+            self.add_item(b)
+
+
+def build_trade_negotiation_view(trade_id: str, select_options: list) -> View:
+    """Menu auteur + bouton partenaire (fil privé)."""
+    v = View(timeout=None)
+    tid = trade_id
+    sel = Select(
+        custom_id=f"rtsela:{tid}",
+        placeholder="Auteur : choisis le rôle que tu donnes",
+        options=select_options[:25],
+        row=0,
+    )
+
+    async def scb(interaction: discord.Interaction):
+        cog = interaction.client.get_cog("CasinoCog")
+        if cog:
+            await cog._handle_rtsela(interaction, tid)
+        elif not interaction.response.is_done():
+            await interaction.response.send_message("Erreur interne.", ephemeral=True)
+
+    sel.callback = scb
+    v.add_item(sel)
+    btn = Button(
+        label="Je cède le rôle recherché (partenaire)",
+        style=discord.ButtonStyle.primary,
+        custom_id=f"rtgivew:{tid}",
+        row=1,
+    )
+
+    async def bcb(interaction: discord.Interaction):
+        cog = interaction.client.get_cog("CasinoCog")
+        if cog:
+            await cog._handle_rtgivew(interaction, tid)
+        elif not interaction.response.is_done():
+            await interaction.response.send_message("Erreur interne.", ephemeral=True)
+
+    btn.callback = bcb
+    v.add_item(btn)
+    return v
 
 
 class CasinoConfigView(View):
@@ -323,40 +426,6 @@ class CasinoConfigView(View):
             "`+casinoset cooldown 15` — secondes entre 2 jeux",
             ephemeral=True,
         )
-
-
-class TradeMoneyView(View):
-    def __init__(self, guild_id: int, from_id: int, to_id: int, amount: int):
-        super().__init__(timeout=120)
-        self.guild_id = guild_id
-        self.from_id = from_id
-        self.to_id = to_id
-        self.amount = amount
-
-    @discord.ui.button(label="Accepter", style=discord.ButtonStyle.success)
-    async def accept(self, interaction: discord.Interaction, btn: Button):
-        if interaction.user.id != self.to_id:
-            await interaction.response.send_message("Ce trade ne vous est pas destiné.", ephemeral=True)
-            return
-        bal = await get_balance(self.guild_id, self.from_id)
-        if bal < self.amount:
-            await interaction.response.send_message("L'expéditeur n'a plus assez de monnaie.", ephemeral=True)
-            return
-        await remove_coins(self.guild_id, self.from_id, self.amount)
-        await add_coins(self.guild_id, self.to_id, self.amount)
-        for c in self.children:
-            c.disabled = True
-        await interaction.response.edit_message(view=self)
-        await interaction.followup.send(f"✅ Trade de **{self.amount}** SayuCoins effectué !")
-
-    @discord.ui.button(label="Refuser", style=discord.ButtonStyle.secondary)
-    async def deny(self, interaction: discord.Interaction, btn: Button):
-        if interaction.user.id != self.to_id:
-            await interaction.response.send_message("Ce trade ne vous est pas destiné.", ephemeral=True)
-            return
-        for c in self.children:
-            c.disabled = True
-        await interaction.response.edit_message(content="❌ Trade refusé.", embed=None, view=self)
 
 
 class CasinoCog(commands.Cog):
@@ -939,7 +1008,7 @@ class CasinoCog(commands.Cog):
         emb = discord.Embed(
             title=f"🏷️ Enchère — {role.name}",
             description=f"Vendeur: {ctx.author.mention}\nPrix de départ: **{prix}**\n"
-            f"{f'**Achat immédiat:** {buyout}' if buyout else ''}\n"
+            f"{f'**Achat immédiat :** {buyout} SC — le **vendeur** valide avec `+auctionbuyout {aid} @acheteur`\n' if buyout else ''}"
             f"Fin: <t:{int(ends.timestamp())}:R>\n`ID: {aid}`",
             color=await get_guild_color(ctx.guild.id),
         )
@@ -954,7 +1023,9 @@ class CasinoCog(commands.Cog):
             join_emb = discord.Embed(
                 title=f"🏷️ Enchère — {role.name}",
                 description=f"Fil **privé** : seuls les membres qui rejoignent peuvent voir les boutons d’enchère.\n"
-                f"Prix de départ : **{prix}** SayuCoins\n`ID: {aid}`",
+                f"Prix de départ : **{prix}** SayuCoins\n"
+                f"{f'Achat immédiat : **{buyout}** SC — le vendeur : `+auctionbuyout {aid} @acheteur`\n' if buyout else ''}"
+                f"`ID: {aid}`",
                 color=color,
             )
             jv = AuctionJoinView(aid)
@@ -1031,48 +1102,442 @@ class CasinoCog(commands.Cog):
         await self._set_ch(ctx, "channel_trade", channel)
 
     @commands.command(name="trade")
-    async def trade(self, ctx, member: discord.Member, montant: int):
+    async def trade(self, ctx, role: discord.Role, *, message: str):
+        """Annonce un trade de rôles : tu cherches @Rôle + message. Un seul partenaire peut répondre."""
         cfg = await get_casino_config(ctx.guild.id)
         err = await _must_be_channel(ctx, cfg, "channel_trade")
         if err:
             return await ctx.send(embed=error_embed("Casino", err))
-        if member.bot or member.id == ctx.author.id:
-            return await ctx.send(embed=error_embed("Trade", "Membre invalide."))
-        if montant < 1:
-            return await ctx.send(embed=error_embed("Trade", "Montant invalide."))
-        bal = await get_balance(ctx.guild.id, ctx.author.id)
-        if bal < montant:
-            return await ctx.send(embed=error_embed("Trade", "Solde insuffisant."))
-        view = TradeMoneyView(ctx.guild.id, ctx.author.id, member.id, montant)
+        if role.is_default() or role.managed:
+            return await ctx.send(embed=error_embed("Trade", "Rôle invalide (managed ou @everyone)."))
+        if role >= ctx.guild.me.top_role:
+            return await ctx.send(embed=error_embed("Trade", "Le bot ne peut pas gérer ce rôle."))
+        if not message.strip():
+            return await ctx.send(embed=error_embed("Trade", "Ajoute un message (ex. ce que tu proposes en échange)."))
+        tid = str(uuid.uuid4())[:10]
+        col = get_collection("role_trades")
+        if col is None:
+            return await ctx.send(embed=error_embed("DB", "Erreur collection."))
         color = await get_guild_color(ctx.guild.id)
         emb = discord.Embed(
-            title="🤝 Trade SayuCoins",
-            description=f"{ctx.author.mention} propose **{montant}** à {member.mention}\n"
-            f"{member.mention} : **Accepter** ou **Refuser** ci-dessous.",
+            title="🤝 Trade de rôles",
+            description=f"**Auteur :** {ctx.author.mention}\n"
+            f"**Je cherche le rôle :** {role.mention}\n\n**Message :**\n{message[:1800]}",
             color=color,
         )
+        emb.set_footer(text=f"ID trade: {tid} · +tradecancel {tid} (auteur)")
+        view = TradeOpenView(tid)
+        msg = await ctx.send(embed=emb, view=view)
+        self.bot.add_view(view)
+        await col.insert_one({
+            "_id": tid,
+            "guild_id": str(ctx.guild.id),
+            "channel_id": str(ctx.channel.id),
+            "message_id": str(msg.id),
+            "author_id": str(ctx.author.id),
+            "wanted_role_id": str(role.id),
+            "message": message[:2000],
+            "status": "open",
+            "claimer_id": None,
+            "thread_id": None,
+            "author_role_id": None,
+            "claimer_role_id": None,
+            "author_conf": False,
+            "claimer_conf": False,
+            "final_panel_sent": False,
+        })
+
+    @commands.command(name="tradecancel")
+    async def tradecancel(self, ctx, trade_id: str):
+        """Annule ton trade ouvert (auteur uniquement)."""
+        col = get_collection("role_trades")
+        if col is None:
+            return await ctx.send(embed=error_embed("DB", "Erreur."))
+        doc = await col.find_one({"_id": trade_id, "guild_id": str(ctx.guild.id)})
+        if not doc:
+            return await ctx.send(embed=error_embed("Trade", "ID introuvable."))
+        if str(ctx.author.id) != doc["author_id"] and not ctx.author.guild_permissions.administrator:
+            return await ctx.send(embed=error_embed("Trade", "Seul l’auteur peut annuler."))
+        if doc["status"] not in ("open", "claimed", "locking"):
+            return await ctx.send(embed=error_embed("Trade", "Ce trade est déjà terminé ou verrouillé."))
+        await col.update_one({"_id": trade_id}, {"$set": {"status": "cancelled"}})
+        tid_th = doc.get("thread_id")
+        if tid_th:
+            t = ctx.guild.get_thread(int(tid_th))
+            if t:
+                try:
+                    await t.edit(archived=True, locked=True)
+                except discord.HTTPException:
+                    pass
+        ch = ctx.guild.get_channel(int(doc["channel_id"]))
+        if ch:
+            try:
+                m = await ch.fetch_message(int(doc["message_id"]))
+                await m.edit(view=None)
+                await m.reply("❌ Trade annulé.", mention_author=False)
+            except Exception:
+                pass
+        await ctx.send(embed=success_embed("Trade", "Trade annulé.", await get_guild_color(ctx.guild.id)))
+
+    @commands.command(name="auctionbuyout")
+    async def auction_buyout_cmd(self, ctx, auction_id: str, member: discord.Member):
+        """(Vendeur) Vend immédiatement au prix d’achat immédiat à @membre — seul le vendeur lance la vente."""
+        cfg = await get_casino_config(ctx.guild.id)
+        ach = cfg.get("auction_channel_id")
+        if ach and ctx.channel.id != ach:
+            ch = ctx.guild.get_channel(ach)
+            if ch:
+                return await ctx.send(embed=error_embed("Enchères", f"Utilise {ch.mention}."))
+        col = get_collection("role_auctions")
+        doc = await col.find_one({"_id": auction_id, "guild_id": str(ctx.guild.id), "status": "active"})
+        if not doc:
+            return await ctx.send(embed=error_embed("Enchères", "Enchère introuvable ou terminée."))
+        if str(ctx.author.id) != doc["seller_id"] and not ctx.author.guild_permissions.administrator:
+            return await ctx.send(embed=error_embed("Enchères", "Seul le **vendeur** peut valider un achat immédiat."))
+        bo = doc.get("buyout")
+        if not bo:
+            return await ctx.send(embed=error_embed("Enchères", "Pas de prix d’achat immédiat sur cette vente."))
+        if member.bot or member.id == int(doc["seller_id"]):
+            return await ctx.send(embed=error_embed("Enchères", "Acheteur invalide."))
+        role = ctx.guild.get_role(int(doc["role_id"]))
+        seller = ctx.guild.get_member(int(doc["seller_id"]))
+        if not role or not seller:
+            return await ctx.send(embed=error_embed("Enchères", "Rôle ou vendeur introuvable."))
+        if role not in seller.roles:
+            return await ctx.send(embed=error_embed("Enchères", "Le vendeur n’a plus le rôle."))
+        bal = await get_balance(ctx.guild.id, member.id)
+        if bal < int(bo):
+            return await ctx.send(embed=error_embed("Enchères", f"{member.mention} n’a pas **{bo}** SayuCoins."))
+        prev = doc.get("current_bidder_id")
+        prev_amt = int(doc["current_bid"])
+        if prev:
+            await add_coins(ctx.guild.id, int(prev), prev_amt)
+        if not await remove_coins(ctx.guild.id, member.id, int(bo)):
+            return await ctx.send(embed=error_embed("Enchères", "Paiement impossible."))
+        await add_coins(ctx.guild.id, seller.id, int(bo))
         try:
-            tname = f"Trade {ctx.author.display_name[:12]} ↔ {member.display_name[:12]}"
-            thread = await _create_private_thread(ctx.channel, tname)
-            await _thread_add_user_safe(thread, ctx.author)
+            await seller.remove_roles(role, reason="Enchère achat immédiat (vendeur)")
+            await member.add_roles(role, reason="Enchère achat immédiat")
+        except discord.HTTPException as e:
+            await add_coins(ctx.guild.id, member.id, int(bo))
+            await remove_coins(ctx.guild.id, seller.id, int(bo))
+            if prev:
+                await remove_coins(ctx.guild.id, int(prev), prev_amt)
+            return await ctx.send(embed=error_embed("Enchères", f"Erreur rôles : {e}"))
+        await col.update_one({"_id": auction_id}, {"$set": {"status": "sold_buyout", "buyout_buyer_id": str(member.id)}})
+        await ctx.send(
+            embed=success_embed(
+                "Enchères",
+                f"Achat immédiat : {member.mention} a reçu {role.mention} pour **{bo}** SayuCoins.",
+                await get_guild_color(ctx.guild.id),
+            )
+        )
+
+    async def _trade_try_final_panel(self, guild: discord.Guild, trade_id: str):
+        col = get_collection("role_trades")
+        if col is None:
+            return
+        doc = await col.find_one({"_id": trade_id})
+        if not doc or doc.get("status") != "claimed" or doc.get("final_panel_sent"):
+            return
+        if not doc.get("author_role_id") or not doc.get("claimer_role_id"):
+            return
+        if str(doc["claimer_role_id"]) != str(doc["wanted_role_id"]):
+            return
+        thread = guild.get_thread(int(doc["thread_id"])) if doc.get("thread_id") else None
+        if not thread:
+            return
+        author = guild.get_member(int(doc["author_id"]))
+        claimer = guild.get_member(int(doc["claimer_id"]))
+        ar = guild.get_role(int(doc["author_role_id"]))
+        wr = guild.get_role(int(doc["wanted_role_id"]))
+        if not all([author, claimer, ar, wr]):
+            return
+        color = await get_guild_color(guild.id)
+        emb = discord.Embed(
+            title="🔒 Validation finale",
+            description=f"**{author.display_name}** donne : {ar.mention}\n"
+            f"**{claimer.display_name}** donne : {wr.mention}\n\n"
+            f"Les **deux** doivent cliquer sur **Confirmer** pour appliquer l’échange.",
+            color=color,
+        )
+        fv = TradeFinalView(trade_id)
+        self.bot.add_view(fv)
+        await thread.send(embed=emb, view=fv)
+        await col.update_one({"_id": trade_id}, {"$set": {"final_panel_sent": True}})
+
+    async def _trade_do_swap_body(
+        self,
+        guild: discord.Guild,
+        trade_id: str,
+        panel_message: discord.Message,
+    ):
+        col = get_collection("role_trades")
+        if col is None:
+            return
+        doc = await col.find_one({"_id": trade_id})
+        if not doc:
+            return
+        author = guild.get_member(int(doc["author_id"]))
+        claimer = guild.get_member(int(doc["claimer_id"]))
+        ar = guild.get_role(int(doc["author_role_id"]))
+        wr = guild.get_role(int(doc["wanted_role_id"]))
+        thread = panel_message.channel
+        if not all([author, claimer, ar, wr]):
+            await col.update_one(
+                {"_id": trade_id},
+                {"$set": {"status": "claimed", "author_conf": False, "claimer_conf": False}},
+            )
+            await thread.send("Membre ou rôle introuvable — échange annulé. Réessaie ou `+tradecancel`.")
+            return
+        if ar not in author.roles or wr not in claimer.roles:
+            await col.update_one(
+                {"_id": trade_id},
+                {"$set": {"status": "claimed", "author_conf": False, "claimer_conf": False}},
+            )
+            await thread.send("Un des rôles n’est plus sur le bon membre — réessaie après correction ou annule.")
+            return
+        try:
+            await author.remove_roles(ar, reason="Trade rôles")
+            await claimer.add_roles(ar, reason="Trade rôles")
+            await claimer.remove_roles(wr, reason="Trade rôles")
+            await author.add_roles(wr, reason="Trade rôles")
+        except discord.HTTPException as e:
+            await col.update_one(
+                {"_id": trade_id},
+                {"$set": {"status": "claimed", "author_conf": False, "claimer_conf": False}},
+            )
+            await thread.send(f"Erreur Discord (hiérarchie / permissions) : {e}")
+            return
+        await col.update_one({"_id": trade_id}, {"$set": {"status": "done"}})
+        try:
+            await panel_message.edit(view=None)
+        except discord.HTTPException:
+            pass
+        await thread.send(
+            f"✅ **Échange terminé** : {author.mention} a reçu {wr.mention}, {claimer.mention} a reçu {ar.mention}."
+        )
+
+    async def _handle_rtclaim(self, interaction: discord.Interaction, trade_id: str):
+        if not interaction.guild:
+            await interaction.response.send_message("Hors serveur.", ephemeral=True)
+            return
+        col = get_collection("role_trades")
+        if col is None:
+            await interaction.response.send_message("Base indisponible.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        doc = await col.find_one({"_id": trade_id, "guild_id": str(interaction.guild.id)})
+        if not doc or doc["status"] != "open":
+            await interaction.followup.send("Trade fermé ou déjà pris.", ephemeral=True)
+            return
+        if str(interaction.user.id) == doc["author_id"]:
+            await interaction.followup.send("Tu ne peux pas répondre à ton propre trade.", ephemeral=True)
+            return
+        wanted = interaction.guild.get_role(int(doc["wanted_role_id"]))
+        if not wanted:
+            await interaction.followup.send("Rôle demandé introuvable.", ephemeral=True)
+            return
+        member = interaction.user if isinstance(interaction.user, discord.Member) else interaction.guild.get_member(interaction.user.id)
+        if not member or wanted not in member.roles:
+            await interaction.followup.send(
+                f"Il te faut le rôle {wanted.mention} pour répondre à ce trade.",
+                ephemeral=True,
+            )
+            return
+        result = await col.update_one(
+            {"_id": trade_id, "guild_id": str(interaction.guild.id), "status": "open"},
+            {"$set": {"claimer_id": str(interaction.user.id), "status": "claimed"}},
+        )
+        if result.matched_count == 0:
+            await interaction.followup.send("Quelqu’un d’autre a déjà pris ce trade.", ephemeral=True)
+            return
+        doc = await col.find_one({"_id": trade_id})
+        bot_me = interaction.guild.me
+        author = interaction.guild.get_member(int(doc["author_id"]))
+        ch = interaction.guild.get_channel(int(doc["channel_id"]))
+        if not author:
+            await col.update_one({"_id": trade_id}, {"$set": {"status": "open", "claimer_id": None}})
+            await interaction.followup.send("Auteur introuvable — trade réouvert.", ephemeral=True)
+            return
+        if ch and isinstance(ch, discord.TextChannel):
+            try:
+                msg = await ch.fetch_message(int(doc["message_id"]))
+                await msg.edit(view=None)
+                await msg.reply(
+                    f"✅ **{member.display_name}** a pris ce trade — la suite se passe dans le fil privé.",
+                    mention_author=False,
+                )
+            except discord.HTTPException:
+                pass
+        if not isinstance(ch, discord.TextChannel):
+            await col.update_one({"_id": trade_id}, {"$set": {"status": "open", "claimer_id": None}})
+            await interaction.followup.send("Salon d’annonce invalide — trade réouvert.", ephemeral=True)
+            return
+        try:
+            thread = await _create_private_thread(ch, f"Trade-{trade_id}")
+            await _thread_add_user_safe(thread, author)
             await _thread_add_user_safe(thread, member)
-            await thread.send(content=f"{ctx.author.mention} {member.mention}", embed=emb, view=view)
-            await ctx.send(
-                embed=success_embed(
-                    "Trade",
-                    f"Proposition dans le fil privé {thread.mention}",
-                    color,
-                )
+            await col.update_one({"_id": trade_id}, {"$set": {"thread_id": str(thread.id)}})
+        except (TypeError, discord.HTTPException) as e:
+            await col.update_one({"_id": trade_id}, {"$set": {"status": "open", "claimer_id": None}})
+            await interaction.followup.send(f"Impossible de créer le fil privé : {e}", ephemeral=True)
+            if ch and isinstance(ch, discord.TextChannel):
+                try:
+                    msg = await ch.fetch_message(int(doc["message_id"]))
+                    ov = TradeOpenView(trade_id)
+                    self.bot.add_view(ov)
+                    await msg.edit(view=ov)
+                except discord.HTTPException:
+                    pass
+            return
+        aroles = _tradable_roles(author, bot_me)
+        croles = _tradable_roles(member, bot_me)
+        color = await get_guild_color(interaction.guild.id)
+        emb = discord.Embed(
+            title="🤝 Trade — négociation",
+            description=f"**Auteur :** {author.mention}\n**Partenaire :** {member.mention}\n\n"
+            f"**Rôle recherché :** {wanted.mention}\n\n"
+            f"**Rôles échangeables (auteur) :**\n{(', '.join(r.mention for r in aroles) or '*(aucun)*')}\n\n"
+            f"**Rôles échangeables (partenaire) :**\n{(', '.join(r.mention for r in croles) or '*(aucun)*')}",
+            color=color,
+        )
+        emb.add_field(
+            name="Étapes",
+            value="1. **Auteur** : menu déroulant — rôle que tu donnes.\n"
+            "2. **Partenaire** : bouton **Je cède le rôle recherché**.\n"
+            "3. Double confirmation pour appliquer l’échange.",
+            inline=False,
+        )
+        if not aroles:
+            await thread.send(
+                embed=emb,
+                content="⚠️ L’auteur n’a aucun rôle échangeable — utilise `+tradecancel` ou ajoute un rôle au bot.",
             )
-        except (TypeError, discord.HTTPException):
-            await ctx.send(member.mention, embed=emb, view=view)
-            await ctx.send(
-                embed=error_embed(
-                    "Trade",
-                    "Impossible de créer un fil privé (salon **texte**, permission bot **Gérer les fils**, "
-                    "fils privés activés côté serveur). La proposition reste dans ce salon.",
-                )
+            await interaction.followup.send(f"Fil créé : {thread.mention} (bloqué : pas de rôle à offrir).", ephemeral=True)
+            return
+        opts = [SelectOption(label=r.name[:100], value=str(r.id)) for r in aroles[:25]]
+        nv = build_trade_negotiation_view(trade_id, opts)
+        self.bot.add_view(nv)
+        await thread.send(embed=emb, view=nv)
+        await interaction.followup.send(f"✅ Trade réservé — fil privé : {thread.mention}", ephemeral=True)
+
+    async def _handle_rtsela(self, interaction: discord.Interaction, trade_id: str):
+        if not interaction.guild:
+            return
+        col = get_collection("role_trades")
+        if col is None:
+            await interaction.response.send_message("Base indisponible.", ephemeral=True)
+            return
+        doc = await col.find_one({"_id": trade_id, "guild_id": str(interaction.guild.id)})
+        if not doc or doc.get("status") != "claimed":
+            await interaction.response.send_message("Trade invalide.", ephemeral=True)
+            return
+        if doc.get("final_panel_sent"):
+            await interaction.response.send_message(
+                "Le panneau final est déjà là — annule avec `+tradecancel` si besoin.",
+                ephemeral=True,
             )
+            return
+        if str(interaction.user.id) != doc["author_id"]:
+            await interaction.response.send_message("Seul l’auteur du trade utilise ce menu.", ephemeral=True)
+            return
+        vals = interaction.data.get("values") or []
+        if not vals:
+            await interaction.response.send_message("Choix vide.", ephemeral=True)
+            return
+        rid = int(vals[0])
+        role = interaction.guild.get_role(rid)
+        author = interaction.guild.get_member(int(doc["author_id"]))
+        if not role or not author or role not in author.roles or role.managed or role.is_default():
+            await interaction.response.send_message("Rôle invalide.", ephemeral=True)
+            return
+        if role >= interaction.guild.me.top_role:
+            await interaction.response.send_message("Le bot ne peut pas transférer ce rôle.", ephemeral=True)
+            return
+        await col.update_one({"_id": trade_id}, {"$set": {"author_role_id": str(rid)}})
+        await interaction.response.send_message(f"✅ Tu offres : {role.mention}.", ephemeral=True)
+        await self._trade_try_final_panel(interaction.guild, trade_id)
+
+    async def _handle_rtgivew(self, interaction: discord.Interaction, trade_id: str):
+        if not interaction.guild:
+            return
+        col = get_collection("role_trades")
+        if col is None:
+            await interaction.response.send_message("Base indisponible.", ephemeral=True)
+            return
+        doc = await col.find_one({"_id": trade_id, "guild_id": str(interaction.guild.id)})
+        if not doc or doc.get("status") != "claimed":
+            await interaction.response.send_message("Trade invalide.", ephemeral=True)
+            return
+        if doc.get("final_panel_sent"):
+            await interaction.response.send_message(
+                "Le panneau final est déjà là — annule avec `+tradecancel` si besoin.",
+                ephemeral=True,
+            )
+            return
+        if str(interaction.user.id) != doc.get("claimer_id"):
+            await interaction.response.send_message("Seul le partenaire utilise ce bouton.", ephemeral=True)
+            return
+        wanted = interaction.guild.get_role(int(doc["wanted_role_id"]))
+        claimer = interaction.guild.get_member(int(doc["claimer_id"]))
+        if not wanted or not claimer or wanted not in claimer.roles:
+            await interaction.response.send_message("Tu n’as plus le rôle demandé.", ephemeral=True)
+            return
+        if wanted >= interaction.guild.me.top_role:
+            await interaction.response.send_message("Le bot ne peut pas transférer ce rôle.", ephemeral=True)
+            return
+        await col.update_one({"_id": trade_id}, {"$set": {"claimer_role_id": str(wanted.id)}})
+        await interaction.response.send_message(f"✅ Tu confirmes céder {wanted.mention}.", ephemeral=True)
+        await self._trade_try_final_panel(interaction.guild, trade_id)
+
+    async def _handle_rtconf(self, interaction: discord.Interaction, trade_id: str, side: str):
+        if not interaction.guild:
+            return
+        col = get_collection("role_trades")
+        if col is None:
+            await interaction.response.send_message("Base indisponible.", ephemeral=True)
+            return
+        doc = await col.find_one({"_id": trade_id, "guild_id": str(interaction.guild.id)})
+        if not doc:
+            await interaction.response.send_message("Trade introuvable.", ephemeral=True)
+            return
+        st = doc.get("status")
+        if st == "done":
+            await interaction.response.send_message("Ce trade est déjà terminé.", ephemeral=True)
+            return
+        if st == "locking":
+            await interaction.response.send_message("Échange en cours…", ephemeral=True)
+            return
+        if st != "claimed" or not doc.get("final_panel_sent"):
+            await interaction.response.send_message("Étape invalide ou panneau manquant.", ephemeral=True)
+            return
+        if side == "author":
+            if str(interaction.user.id) != doc["author_id"]:
+                await interaction.response.send_message("Ce bouton est pour l’auteur du trade.", ephemeral=True)
+                return
+            await col.update_one({"_id": trade_id}, {"$set": {"author_conf": True}})
+        else:
+            if str(interaction.user.id) != doc.get("claimer_id"):
+                await interaction.response.send_message("Ce bouton est pour le partenaire.", ephemeral=True)
+                return
+            await col.update_one({"_id": trade_id}, {"$set": {"claimer_conf": True}})
+        doc2 = await col.find_one({"_id": trade_id})
+        if doc2.get("author_conf") and doc2.get("claimer_conf"):
+            lock = await col.update_one(
+                {"_id": trade_id, "status": "claimed"},
+                {"$set": {"status": "locking"}},
+            )
+            if lock.modified_count:
+                await interaction.response.defer(ephemeral=True)
+                await self._trade_do_swap_body(interaction.guild, trade_id, interaction.message)
+                await interaction.followup.send("✅ Échange appliqué (voir le fil).", ephemeral=True)
+                return
+            doc3 = await col.find_one({"_id": trade_id})
+            if doc3 and doc3.get("status") == "done":
+                await interaction.response.send_message("✅ Échange déjà effectué.", ephemeral=True)
+                return
+        await interaction.response.send_message("✅ Confirmation enregistrée.", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
@@ -1123,14 +1588,16 @@ class CasinoCog(commands.Cog):
         if not role:
             await interaction.response.send_message("Rôle introuvable.", ephemeral=True)
             return
-        if action == "buyout":
-            if not doc.get("buyout"):
-                await interaction.response.send_message("Pas d'achat immédiat sur cette vente.", ephemeral=True)
-                return
-            bid = doc["buyout"]
-        else:
+        try:
             inc = int(action)
-            bid = int(doc["current_bid"]) + max(inc, cfg.get("bid_increment_min", 100))
+        except ValueError:
+            await interaction.response.send_message(
+                "L’achat immédiat ne se fait **plus** par bouton : le **vendeur** utilise "
+                f"`+auctionbuyout {aid} @acheteur` dans le salon enchères.",
+                ephemeral=True,
+            )
+            return
+        bid = int(doc["current_bid"]) + max(inc, cfg.get("bid_increment_min", 100))
         prev = doc.get("current_bidder_id")
         prev_amt = int(doc["current_bid"])
         if str(interaction.user.id) == doc["seller_id"]:
@@ -1150,7 +1617,9 @@ class CasinoCog(commands.Cog):
         ea = doc2.get("ends_at")
         ts = int(ea.timestamp()) if hasattr(ea, "timestamp") else 0
         bo = doc2.get("buyout")
-        extra = f"Achat immédiat: **{bo}**\n" if bo else ""
+        extra = (
+            f"Achat immédiat : **{bo}** SC — vendeur : `+auctionbuyout {aid} @acheteur`\n" if bo else ""
+        )
         emb = discord.Embed(
             title=interaction.message.embeds[0].title,
             description=f"Vendeur: <@{doc2['seller_id']}>\n**Enchère actuelle: {doc2['current_bid']}** — <@{interaction.user.id}>\n"
@@ -1172,3 +1641,9 @@ async def setup(bot):
                 bot.add_view(AuctionBidView(str(aid)))
                 if doc.get("join_message_id"):
                     bot.add_view(AuctionJoinView(str(aid)))
+    rtc = get_collection("role_trades")
+    if rtc is not None:
+        async for doc in rtc.find({"status": "open"}):
+            tid = doc.get("_id")
+            if tid:
+                bot.add_view(TradeOpenView(str(tid)))

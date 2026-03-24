@@ -18,7 +18,7 @@ CONSULT_COMMANDS = {
     "helpcasino", "casinohelp", "aidecasino",
     "helpcasinocomplet", "casinolist", "listecasino",
     "casinoconfig", "casinolb", "casinoleaderboard",
-    "casinostats", "casino", "trade", "sellrole", "auctioncancel",
+    "casinostats", "casino", "trade", "tradecancel", "sellrole", "auctioncancel", "auctionbuyout",
     "casino slots", "casino flip", "casino pfc", "casino blackjack",
     "shop", "inventory", "glist",
     "settings", "ping", "licenceinfo", "redeem",
