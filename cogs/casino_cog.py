@@ -102,28 +102,40 @@ def _cd_key(gid: int, uid: int, game: str) -> str:
 
 DEFAULT_CASINO_RANKS = [
     {"emoji": "🎲", "name": "Casino - Débutant", "color": 0x95A5A6, "req_net": 0, "req_games": 0,
+     "desc": "Tu apprends : no stress, casino classique.",
      "bonus": {"cooldown_minus": 0, "win_bonus_pct": 0, "slots_luck": 0.00, "flip_luck": 0.00, "pfc_luck": 0.00}},
     {"emoji": "🪙", "name": "Casino - Joueur", "color": 0x2ECC71, "req_net": 2_000, "req_games": 20,
+     "desc": "Un premier boost pour enchaîner sans trop attendre.",
      "bonus": {"cooldown_minus": 1, "win_bonus_pct": 1, "slots_luck": 0.01, "flip_luck": 0.00, "pfc_luck": 0.00}},
     {"emoji": "🍀", "name": "Casino - Chanceux", "color": 0x1ABC9C, "req_net": 6_000, "req_games": 60,
+     "desc": "Un peu plus de chance sur tes décisions (flip & PFC).",
      "bonus": {"cooldown_minus": 2, "win_bonus_pct": 1, "slots_luck": 0.02, "flip_luck": 0.01, "pfc_luck": 0.01}},
     {"emoji": "🎰", "name": "Casino - Addict Slots", "color": 0x9B59B6, "req_net": 12_000, "req_games": 120,
+     "desc": "Spécialiste des slots : 💎 et 7️⃣ reviennent un peu plus souvent.",
      "bonus": {"cooldown_minus": 3, "win_bonus_pct": 2, "slots_luck": 0.04, "flip_luck": 0.00, "pfc_luck": 0.00}},
     {"emoji": "🃏", "name": "Casino - Stratège", "color": 0x5865F2, "req_net": 25_000, "req_games": 200,
+     "desc": "Tu joues propre : gains nets un peu plus élevés, approche plus stable.",
      "bonus": {"cooldown_minus": 4, "win_bonus_pct": 2, "slots_luck": 0.00, "flip_luck": 0.00, "pfc_luck": 0.00}},
     {"emoji": "🔥", "name": "Casino - High Roller", "color": 0xE67E22, "req_net": 45_000, "req_games": 300,
+     "desc": "Le chaud : cooldown réduit et bonus sur le net.",
      "bonus": {"cooldown_minus": 5, "win_bonus_pct": 3, "slots_luck": 0.01, "flip_luck": 0.00, "pfc_luck": 0.00}},
     {"emoji": "💎", "name": "Casino - VIP", "color": 0x00D1FF, "req_net": 80_000, "req_games": 450,
+     "desc": "Le VIP a la main : un confort accru sur plusieurs jeux.",
      "bonus": {"cooldown_minus": 6, "win_bonus_pct": 3, "slots_luck": 0.02, "flip_luck": 0.01, "pfc_luck": 0.01}},
     {"emoji": "👑", "name": "Casino - Élite", "color": 0xF1C40F, "req_net": 130_000, "req_games": 650,
+     "desc": "L’élite : gains nets améliorés et chance progressive.",
      "bonus": {"cooldown_minus": 7, "win_bonus_pct": 4, "slots_luck": 0.03, "flip_luck": 0.01, "pfc_luck": 0.01}},
     {"emoji": "🌟", "name": "Casino - Légende", "color": 0xFF4D4D, "req_net": 220_000, "req_games": 900,
+     "desc": "Presque intouchable : boosts plus forts et cooldown très bas.",
      "bonus": {"cooldown_minus": 8, "win_bonus_pct": 4, "slots_luck": 0.04, "flip_luck": 0.02, "pfc_luck": 0.02}},
     {"emoji": "🧿", "name": "Casino - Mythique", "color": 0xB200FF, "req_net": 350_000, "req_games": 1_200,
+     "desc": "Le mythique : maximum de confort + petites chances sur les jeux.",
      "bonus": {"cooldown_minus": 9, "win_bonus_pct": 5, "slots_luck": 0.05, "flip_luck": 0.02, "pfc_luck": 0.02}},
     {"emoji": "⚜️", "name": "Casino - Royal", "color": 0xFFD700, "req_net": 550_000, "req_games": 1_700,
+     "desc": "Royal : tu joues au sommet, boosts solides partout.",
      "bonus": {"cooldown_minus": 10, "win_bonus_pct": 5, "slots_luck": 0.05, "flip_luck": 0.03, "pfc_luck": 0.03}},
     {"emoji": "🪽", "name": "Casino - Divin", "color": 0xFFFFFF, "req_net": 850_000, "req_games": 2_400,
+     "desc": "Le divin : cooldown minimal et net amélioré (très léger).",
      "bonus": {"cooldown_minus": 11, "win_bonus_pct": 6, "slots_luck": 0.06, "flip_luck": 0.03, "pfc_luck": 0.03}},
 ]
 
@@ -599,6 +611,11 @@ class CasinoCog(commands.Cog):
             "`+casinoranks panel` — (admin) poste/maj le panel dans le salon ranks\n"
             "`+casinoranks setup` — (admin) crée la hiérarchie de rôles\n"
             "`+setrankcasino #salon` — (admin) définit le salon panel",
+            inline=False,
+        )
+        embed.add_field(
+            name="🏷️ Hiérarchie Casino",
+            value="`+hierarchie` — la liste complète (index + descriptifs).",
             inline=False,
         )
         embed.add_field(
@@ -1491,6 +1508,57 @@ class CasinoCog(commands.Cog):
                 f"Manque: net **{need_net:,}** · parties **{need_games:,}**",
                 inline=False,
             )
+        await ctx.send(embed=emb)
+
+    @commands.command(name="hierarchie", aliases=["hierarchiecasino", "casinohierarchie"])
+    async def hierarchie(self, ctx):
+        """Affiche la hiérarchie casino (emoji | nom + descriptif) numérotée."""
+        await self._ranks_ensure_defaults(ctx.guild.id)
+        cfg = await get_casino_ranks_config(ctx.guild.id)
+        ranks = cfg.get("ranks") or []
+        if not ranks:
+            return await ctx.send(embed=error_embed("Ranks Casino", "Setup requis : `+casinoranks setup`."))
+
+        color = await get_guild_color(ctx.guild.id)
+        emb = discord.Embed(
+            title="🏆 Hiérarchie Casino",
+            description="Progression basée sur : `net gagné` + `nombre de parties`.\n"
+            "Index = rang (0 -> débutant, 11 -> divin).",
+            color=color,
+        )
+
+        blocks = []
+        for i, r in enumerate(ranks):
+            emoji = r.get("emoji", "🎲")
+            name = r.get("name", "Casino")
+            desc = r.get("desc", "—")
+            bonus = r.get("bonus") or {}
+            cd = int(bonus.get("cooldown_minus", 0))
+            win_pct = int(bonus.get("win_bonus_pct", 0))
+            slots_luck = float(bonus.get("slots_luck", 0.0))
+            flip_luck = float(bonus.get("flip_luck", 0.0))
+            pfc_luck = float(bonus.get("pfc_luck", 0.0))
+            req_net = int(r.get("req_net", 0))
+            req_games = int(r.get("req_games", 0))
+
+            luck_parts = []
+            if slots_luck > 0:
+                luck_parts.append(f"Slots +{slots_luck * 100:.1f}%")
+            if flip_luck > 0:
+                luck_parts.append(f"Flip +{flip_luck * 100:.1f}%")
+            if pfc_luck > 0:
+                luck_parts.append(f"PFC +{pfc_luck * 100:.1f}%")
+            luck_txt = " · ".join(luck_parts) if luck_parts else "—"
+
+            blocks.append(
+                f"`{i}` {emoji} | **{name}**\n"
+                f"{desc}\n"
+                f"Req: net ≥ **{req_net:,}** · parties ≥ **{req_games:,}**\n"
+                f"Bonus: -{cd}s CD · +{win_pct}% net · {luck_txt}"
+            )
+
+        emb.description = "\n\n".join(blocks)
+        emb.set_footer(text="Astuce : `+casinoranks panel` pour un panel plus joli dans le salon rank.")
         await ctx.send(embed=emb)
 
     @commands.command(name="trade")
