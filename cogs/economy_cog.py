@@ -219,6 +219,43 @@ class EconomyCog(commands.Cog):
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
+    @commands.command(name="addallcoins")
+    @commands.has_permissions(administrator=True)
+    async def addallcoins(self, ctx, amount: int):
+        """Ajoute des SayuCoins à tous les membres (admin)"""
+        try:
+            amount = int(amount)
+            if amount < 1:
+                await ctx.send(embed=error_embed("Coins", "Montant invalide."))
+                return
+            col = get_collection("economy")
+            if col is None:
+                await ctx.send(embed=error_embed("DB", "Erreur collection."))
+                return
+            n = 0
+            for m in ctx.guild.members:
+                if m.bot:
+                    continue
+                await col.update_one(
+                    {"guild_id": str(ctx.guild.id), "user_id": str(m.id)},
+                    {"$inc": {"balance": amount}},
+                    upsert=True,
+                )
+                n += 1
+            config = await get_guild_config(ctx.guild.id)
+            currency_name = config.get("currency_name", "SayuCoins")
+            currency_emoji = config.get("currency_emoji", "💰")
+            color = await get_guild_color(ctx.guild.id)
+            await ctx.send(
+                embed=success_embed(
+                    "Coins",
+                    f"+**{amount:,}** {currency_name} {currency_emoji} pour **{n}** membres.",
+                    color,
+                )
+            )
+        except Exception as e:
+            await ctx.send(embed=error_embed("Erreur", str(e)))
+
     @commands.command(name="coinstop")
     async def coinstop(self, ctx, page: int = 1):
         """Top 10 richesse (leaderboard coins)"""

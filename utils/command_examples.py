@@ -60,6 +60,7 @@ EXAMPLES_FR: Dict[str, List[str]] = {
     "help": ["help"],
     "setprefix": ["setprefix !"],
     "setcurrency": ["setcurrency Or", "setcurrency SayuCoins 🪙"],
+    "addallcoins": ["addallcoins 1000"],
     "addmessagerole": ["addmessagerole @Palier 500 1000"],
     "addvoicerole": ["addvoicerole @Vocal+ 180"],
     "setrankchannel": ["setrankchannel #annonces"],

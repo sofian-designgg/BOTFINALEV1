@@ -230,6 +230,22 @@ class AuctionBidView(View):
         self.add_item(Button(label="+100", style=discord.ButtonStyle.primary, custom_id=f"auc:{auction_id}:100"))
         self.add_item(Button(label="+500", style=discord.ButtonStyle.primary, custom_id=f"auc:{auction_id}:500"))
         self.add_item(Button(label="+1000", style=discord.ButtonStyle.success, custom_id=f"auc:{auction_id}:1000"))
+        btn = Button(
+            label="✅ Accepter l’offre (vendeur)",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"auc:{auction_id}:accept",
+            row=1,
+        )
+
+        async def cb(interaction: discord.Interaction):
+            cog = interaction.client.get_cog("CasinoCog")
+            if cog:
+                await cog._handle_auc_accept(interaction, auction_id)
+            elif not interaction.response.is_done():
+                await interaction.response.send_message("Erreur interne.", ephemeral=True)
+
+        btn.callback = cb
+        self.add_item(btn)
 
 
 class AuctionJoinView(View):
@@ -1546,6 +1562,82 @@ class CasinoCog(commands.Cog):
                 return
         await interaction.response.send_message("✅ Confirmation enregistrée.", ephemeral=True)
 
+    async def _handle_auc_accept(self, interaction: discord.Interaction, auction_id: str):
+        if not interaction.guild:
+            return
+        col = get_collection("role_auctions")
+        if col is None:
+            await interaction.response.send_message("Base indisponible.", ephemeral=True)
+            return
+        doc = await col.find_one({"_id": auction_id, "guild_id": str(interaction.guild.id), "status": "active"})
+        if not doc:
+            await interaction.response.send_message("Enchère terminée ou introuvable.", ephemeral=True)
+            return
+        if str(interaction.user.id) != doc["seller_id"] and not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("Seul le **vendeur** peut accepter une offre.", ephemeral=True)
+            return
+        buyer_id = doc.get("current_bidder_id")
+        if not buyer_id:
+            await interaction.response.send_message("Aucune offre pour le moment.", ephemeral=True)
+            return
+        role = interaction.guild.get_role(int(doc["role_id"]))
+        seller = interaction.guild.get_member(int(doc["seller_id"]))
+        buyer = interaction.guild.get_member(int(buyer_id))
+        if not role or not seller or not buyer:
+            await interaction.response.send_message("Rôle / vendeur / acheteur introuvable.", ephemeral=True)
+            return
+        if role not in seller.roles:
+            await interaction.response.send_message("Tu n’as plus le rôle à vendre.", ephemeral=True)
+            return
+
+        price = int(doc.get("current_bid", 0))
+        if price < 1:
+            await interaction.response.send_message("Montant invalide.", ephemeral=True)
+            return
+
+        lock = await col.update_one(
+            {"_id": auction_id, "guild_id": str(interaction.guild.id), "status": "active"},
+            {"$set": {"status": "selling"}},
+        )
+        if not lock.modified_count:
+            await interaction.response.send_message("Vente déjà en cours.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        await add_coins(interaction.guild.id, seller.id, price)
+        try:
+            await seller.remove_roles(role, reason="Enchère: offre acceptée")
+            await buyer.add_roles(role, reason="Enchère: offre acceptée")
+        except discord.HTTPException as e:
+            await remove_coins(interaction.guild.id, seller.id, price)
+            await col.update_one({"_id": auction_id}, {"$set": {"status": "active"}})
+            await interaction.followup.send(f"Erreur Discord (rôles) : {e}", ephemeral=True)
+            return
+
+        await col.update_one(
+            {"_id": auction_id},
+            {"$set": {"status": "sold_accept", "accepted_at": datetime.now(timezone.utc)}},
+        )
+        try:
+            await interaction.message.edit(view=None)
+        except discord.HTTPException:
+            pass
+        try:
+            thread_id = doc.get("thread_id")
+            if thread_id:
+                th = interaction.guild.get_thread(int(thread_id))
+                if th:
+                    await th.send(
+                        f"✅ Offre acceptée : {buyer.mention} a reçu {role.mention} pour **{price}** SayuCoins."
+                    )
+                    try:
+                        await th.edit(archived=True, locked=True)
+                    except discord.HTTPException:
+                        pass
+        except Exception:
+            pass
+        await interaction.followup.send("✅ Offre acceptée (voir le fil).", ephemeral=True)
+
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
         if interaction.type != InteractionType.component:
@@ -1594,6 +1686,10 @@ class CasinoCog(commands.Cog):
         role = interaction.guild.get_role(int(doc["role_id"]))
         if not role:
             await interaction.response.send_message("Rôle introuvable.", ephemeral=True)
+            return
+        if action == "accept":
+            # Callback déjà géré par la View, mais on garde ce fallback.
+            await self._handle_auc_accept(interaction, aid)
             return
         try:
             inc = int(action)
