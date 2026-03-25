@@ -100,6 +100,94 @@ def _cd_key(gid: int, uid: int, game: str) -> str:
     return f"{gid}:{uid}:{game}"
 
 
+DEFAULT_CASINO_RANKS = [
+    {"emoji": "🎲", "name": "Casino - Débutant", "color": 0x95A5A6, "req_net": 0, "req_games": 0,
+     "bonus": {"cooldown_minus": 0, "win_bonus_pct": 0, "slots_luck": 0.00, "flip_luck": 0.00, "pfc_luck": 0.00}},
+    {"emoji": "🪙", "name": "Casino - Joueur", "color": 0x2ECC71, "req_net": 2_000, "req_games": 20,
+     "bonus": {"cooldown_minus": 1, "win_bonus_pct": 1, "slots_luck": 0.01, "flip_luck": 0.00, "pfc_luck": 0.00}},
+    {"emoji": "🍀", "name": "Casino - Chanceux", "color": 0x1ABC9C, "req_net": 6_000, "req_games": 60,
+     "bonus": {"cooldown_minus": 2, "win_bonus_pct": 1, "slots_luck": 0.02, "flip_luck": 0.01, "pfc_luck": 0.01}},
+    {"emoji": "🎰", "name": "Casino - Addict Slots", "color": 0x9B59B6, "req_net": 12_000, "req_games": 120,
+     "bonus": {"cooldown_minus": 3, "win_bonus_pct": 2, "slots_luck": 0.04, "flip_luck": 0.00, "pfc_luck": 0.00}},
+    {"emoji": "🃏", "name": "Casino - Stratège", "color": 0x5865F2, "req_net": 25_000, "req_games": 200,
+     "bonus": {"cooldown_minus": 4, "win_bonus_pct": 2, "slots_luck": 0.00, "flip_luck": 0.00, "pfc_luck": 0.00}},
+    {"emoji": "🔥", "name": "Casino - High Roller", "color": 0xE67E22, "req_net": 45_000, "req_games": 300,
+     "bonus": {"cooldown_minus": 5, "win_bonus_pct": 3, "slots_luck": 0.01, "flip_luck": 0.00, "pfc_luck": 0.00}},
+    {"emoji": "💎", "name": "Casino - VIP", "color": 0x00D1FF, "req_net": 80_000, "req_games": 450,
+     "bonus": {"cooldown_minus": 6, "win_bonus_pct": 3, "slots_luck": 0.02, "flip_luck": 0.01, "pfc_luck": 0.01}},
+    {"emoji": "👑", "name": "Casino - Élite", "color": 0xF1C40F, "req_net": 130_000, "req_games": 650,
+     "bonus": {"cooldown_minus": 7, "win_bonus_pct": 4, "slots_luck": 0.03, "flip_luck": 0.01, "pfc_luck": 0.01}},
+    {"emoji": "🌟", "name": "Casino - Légende", "color": 0xFF4D4D, "req_net": 220_000, "req_games": 900,
+     "bonus": {"cooldown_minus": 8, "win_bonus_pct": 4, "slots_luck": 0.04, "flip_luck": 0.02, "pfc_luck": 0.02}},
+    {"emoji": "🧿", "name": "Casino - Mythique", "color": 0xB200FF, "req_net": 350_000, "req_games": 1_200,
+     "bonus": {"cooldown_minus": 9, "win_bonus_pct": 5, "slots_luck": 0.05, "flip_luck": 0.02, "pfc_luck": 0.02}},
+    {"emoji": "⚜️", "name": "Casino - Royal", "color": 0xFFD700, "req_net": 550_000, "req_games": 1_700,
+     "bonus": {"cooldown_minus": 10, "win_bonus_pct": 5, "slots_luck": 0.05, "flip_luck": 0.03, "pfc_luck": 0.03}},
+    {"emoji": "🪽", "name": "Casino - Divin", "color": 0xFFFFFF, "req_net": 850_000, "req_games": 2_400,
+     "bonus": {"cooldown_minus": 11, "win_bonus_pct": 6, "slots_luck": 0.06, "flip_luck": 0.03, "pfc_luck": 0.03}},
+]
+
+
+async def get_casino_ranks_config(gid: int) -> dict:
+    col = get_collection("casino_ranks_config")
+    if col is None:
+        return {"_id": str(gid), "enabled": False, "rank_channel_id": None, "panel_message_id": None, "ranks": []}
+    doc = await col.find_one({"_id": str(gid)})
+    if not doc:
+        return {"_id": str(gid), "enabled": False, "rank_channel_id": None, "panel_message_id": None, "ranks": []}
+    return doc
+
+
+async def update_casino_ranks_config(gid: int, data: dict):
+    col = get_collection("casino_ranks_config")
+    if col is None:
+        return
+    await col.update_one({"_id": str(gid)}, {"$set": data}, upsert=True)
+
+
+async def get_member_casino_rank_bonus(guild: discord.Guild, member: discord.Member) -> dict:
+    cfg = await get_casino_ranks_config(guild.id)
+    ranks = cfg.get("ranks") or []
+    if not cfg.get("enabled") or not ranks:
+        return {"cooldown_minus": 0, "win_bonus_pct": 0, "slots_luck": 0.0, "flip_luck": 0.0, "pfc_luck": 0.0}
+    owned = {r.id for r in member.roles}
+    best = None
+    for r in ranks:
+        rid = r.get("role_id")
+        if rid and int(rid) in owned:
+            best = r
+    if not best:
+        return {"cooldown_minus": 0, "win_bonus_pct": 0, "slots_luck": 0.0, "flip_luck": 0.0, "pfc_luck": 0.0}
+    b = (best.get("bonus") or {})
+    return {
+        "cooldown_minus": int(b.get("cooldown_minus", 0)),
+        "win_bonus_pct": int(b.get("win_bonus_pct", 0)),
+        "slots_luck": float(b.get("slots_luck", 0.0)),
+        "flip_luck": float(b.get("flip_luck", 0.0)),
+        "pfc_luck": float(b.get("pfc_luck", 0.0)),
+    }
+
+
+async def _casino_get_user_net_games(gid: int, uid: int) -> tuple[int, int]:
+    col = get_collection("casino_stats")
+    if col is None:
+        return 0, 0
+    doc = await col.find_one({"guild_id": str(gid), "user_id": str(uid)})
+    net = int(doc.get("net", 0)) if doc else 0
+    games = int(doc.get("games", 0)) if doc else 0
+    return net, games
+
+
+def _casino_best_rank_index(ranks: list, *, net: int, games: int) -> int:
+    """Retourne l'index du meilleur rang validé (>=0)."""
+    best = 0
+    for i, r in enumerate(ranks):
+        rn = int(r.get("req_net", 0))
+        rg = int(r.get("req_games", 0))
+        if net >= rn and games >= rg:
+            best = i
+    return best
+
 async def check_casino_cooldown(gid: int, uid: int, game: str, seconds: int) -> tuple[bool, int]:
     k = _cd_key(gid, uid, game)
     now = time.time()
@@ -148,7 +236,9 @@ async def validate_bet(ctx, bet: int, game: str) -> Optional[str]:
     bal = await get_balance(ctx.guild.id, ctx.author.id)
     if bal < bet:
         return f"Pas assez de SayuCoins pour cette mise : il te faut **{bet}**, tu as **{bal}**. (Gagne des coins avec +daily, +weekly, messages, etc.)"
-    ok_cd, left = await check_casino_cooldown(ctx.guild.id, ctx.author.id, game, cfg["cooldown_seconds"])
+    bonus = await get_member_casino_rank_bonus(ctx.guild, ctx.author)
+    eff_cd = max(1, int(cfg["cooldown_seconds"]) - int(bonus.get("cooldown_minus", 0)))
+    ok_cd, left = await check_casino_cooldown(ctx.guild.id, ctx.author.id, game, eff_cd)
     if not ok_cd:
         return f"Cooldown : attendez **{left}s**."
     used = await get_daily_count(ctx.guild.id, ctx.author.id)
@@ -168,6 +258,15 @@ async def take_house_fee(gross_win: int, fee_pct: int) -> int:
     return max(0, gross_win - fee)
 
 
+def apply_rank_win_bonus(net: int, bonus_pct: int) -> int:
+    if net <= 0:
+        return 0
+    bonus_pct = int(bonus_pct or 0)
+    if bonus_pct <= 0:
+        return net
+    return int(net * (1 + bonus_pct / 100))
+
+
 def _casino_help_full_embeds(color: int) -> List[discord.Embed]:
     """Une entrée = une commande (ou alias), sans exception."""
     lines_joueurs = [
@@ -184,6 +283,7 @@ def _casino_help_full_embeds(color: int) -> List[discord.Embed]:
         ("`+sellrole @Rôle [prix_départ] [achat_immédiat]`", "Met un rôle aux enchères (tu dois le posséder). **Sans frais de dépôt** par défaut. Commande **dans le salon enchères**."),
         ("`+auctioncancel [id]`", "Annule **ta** vente. Les admins peuvent annuler n’importe quelle enchère. Salon enchères si configuré."),
         ("`+trade @Rôle *message*`", "Tu **proposes** un rôle que tu possèdes : annonce + **un seul** partenaire répond ; fil privé, choix du rôle en échange, double confirmation. `+tradecancel [id]` (auteur)."),
+        ("`+casinoranks me`", "Ton rang casino, tes bonus, et ta progression vers le prochain grade."),
         ("**Qui peut jouer ?**", "Tout membre du serveur (avec licence bot active) peut utiliser les jeux **sans être staff**. Seules les mises comptent : si ton solde < mise min ou < mise choisie, le bot refuse."),
     ]
     lines_admin = [
@@ -212,6 +312,11 @@ def _casino_help_full_embeds(color: int) -> List[discord.Embed]:
         ("`+casinoset setchannel encheres [#salon]`", "Même effet que +casinoset auctionchannel."),
         ("`+casinoset chslots [#salon]` … `chbj`", "Raccourcis identiques à setchannel (slots, flip, pfc, chbj, chleaderboard, chtrade)."),
         ("`+casinoset game [slots|flip|pfc|blackjack] [on|off]`", "Active ou désactive un jeu."),
+        ("`+setrankcasino #salon`", "Salon du panel ranks casino."),
+        ("`+casinoranks setup`", "Crée les 12 rôles casino (emoji | nom) + hiérarchie."),
+        ("`+casinoranks panel`", "Poste / met à jour le panel de progression (embed) dans le salon ranks."),
+        ("`+casinoranks sync`", "Attribue le bon rang à tous (ou un membre) selon net + parties."),
+        ("`+casinoranks setreq [index] [net] [parties]`", "Modifie les conditions d’un rang (0–11)."),
     ]
     emb1 = discord.Embed(title="📜 Liste complète — Joueurs", color=color)
     emb1.description = "\n\n".join(f"**{cmd}**\n{desc}" for cmd, desc in lines_joueurs)
@@ -486,6 +591,14 @@ class CasinoCog(commands.Cog):
         embed.add_field(
             name="⚙️ Config (admin)",
             value="`+casinopanel` · `+casinoconfig` · `+casinoset` minbet, maxbet, cooldown, daily, fee, auctionchannel, game …",
+            inline=False,
+        )
+        embed.add_field(
+            name="🏆 Ranks Casino (progression)",
+            value="`+casinoranks me` — ton rang + progression\n"
+            "`+casinoranks panel` — (admin) poste/maj le panel dans le salon ranks\n"
+            "`+casinoranks setup` — (admin) crée la hiérarchie de rôles\n"
+            "`+setrankcasino #salon` — (admin) définit le salon panel",
             inline=False,
         )
         embed.add_field(
@@ -799,8 +912,12 @@ class CasinoCog(commands.Cog):
         if not await remove_coins(ctx.guild.id, ctx.author.id, mise):
             return await ctx.send(embed=error_embed("Casino", "Solde insuffisant."))
         await after_bet_ok(ctx, "slots")
+        bonus = await get_member_casino_rank_bonus(ctx.guild, ctx.author)
+        luck = max(0.0, float(bonus.get("slots_luck", 0.0)))
         symbols = ["🍒", "🍋", "🍊", "💎", "7️⃣"]
-        a, b, c = random.choices(symbols, k=3)
+        # Luck: augmente légèrement la proba de 💎 et 7️⃣ sans casser l'économie
+        w = [1.0, 1.0, 1.0, 0.6 + (luck * 6.0), 0.35 + (luck * 6.0)]
+        a, b, c = random.choices(symbols, weights=w, k=3)
         mult = 0
         if a == b == c:
             mult = 10 if a == "7️⃣" else 8
@@ -808,6 +925,7 @@ class CasinoCog(commands.Cog):
             mult = 2
         gross = mise * mult if mult else 0
         net = await take_house_fee(gross, cfg["house_fee_percent"])
+        net = apply_rank_win_bonus(net, int(bonus.get("win_bonus_pct", 0)))
         if net:
             await add_coins(ctx.guild.id, ctx.author.id, net)
         await inc_casino_stat(ctx.guild.id, ctx.author.id, wagered=mise, won=net)
@@ -831,10 +949,16 @@ class CasinoCog(commands.Cog):
         if not await remove_coins(ctx.guild.id, ctx.author.id, mise):
             return await ctx.send(embed=error_embed("Casino", "Solde insuffisant."))
         await after_bet_ok(ctx, "flip")
-        result = random.choice(["pile", "face"])
+        bonus = await get_member_casino_rank_bonus(ctx.guild, ctx.author)
+        luck = max(0.0, float(bonus.get("flip_luck", 0.0)))
+        if luck and random.random() < luck:
+            result = choix
+        else:
+            result = random.choice(["pile", "face"])
         win = choix == result
         gross = mise * 2 if win else 0
         net = await take_house_fee(gross, cfg["house_fee_percent"]) if win else 0
+        net = apply_rank_win_bonus(net, int(bonus.get("win_bonus_pct", 0))) if win else 0
         if net:
             await add_coins(ctx.guild.id, ctx.author.id, net)
         await inc_casino_stat(ctx.guild.id, ctx.author.id, wagered=mise, won=net)
@@ -860,8 +984,14 @@ class CasinoCog(commands.Cog):
         if not await remove_coins(ctx.guild.id, ctx.author.id, mise):
             return await ctx.send(embed=error_embed("Casino", "Solde insuffisant."))
         await after_bet_ok(ctx, "pfc")
-        bot_c = random.choice(list(PFC.keys()))
+        bonus = await get_member_casino_rank_bonus(ctx.guild, ctx.author)
+        luck = max(0.0, float(bonus.get("pfc_luck", 0.0)))
         wins = {"pierre": "ciseaux", "feuille": "pierre", "ciseaux": "feuille"}
+        if luck and random.random() < luck:
+            # bot choisit le coup qui perd contre le joueur
+            bot_c = wins[choix]
+        else:
+            bot_c = random.choice(list(PFC.keys()))
         if choix == bot_c:
             await add_coins(ctx.guild.id, ctx.author.id, mise)
             net = 0
@@ -870,6 +1000,7 @@ class CasinoCog(commands.Cog):
         elif wins[choix] == bot_c:
             gross = mise * 2
             net = await take_house_fee(gross, cfg["house_fee_percent"])
+            net = apply_rank_win_bonus(net, int(bonus.get("win_bonus_pct", 0)))
             await add_coins(ctx.guild.id, ctx.author.id, net)
             await inc_casino_stat(ctx.guild.id, ctx.author.id, wagered=mise, won=net)
             msg = "Victoire"
@@ -959,10 +1090,12 @@ class CasinoCog(commands.Cog):
                 while hand_value(self.dealer) < 17:
                     self.dealer.append(self.deck.pop())
                 pv, dv = hand_value(self.player), hand_value(self.dealer)
+                bonus = await get_member_casino_rank_bonus(interaction.guild, interaction.user)
                 net = 0
                 if dv > 21 or pv > dv:
                     gross = mise * 2
                     net = await take_house_fee(gross, fee)
+                    net = apply_rank_win_bonus(net, int(bonus.get("win_bonus_pct", 0)))
                     await add_coins(gid, uid, net)
                 elif pv == dv:
                     await add_coins(gid, uid, mise)
@@ -1116,6 +1249,249 @@ class CasinoCog(commands.Cog):
     async def settradechannel(self, ctx, channel: discord.TextChannel = None):
         """Définit le salon où +trade est autorisé (sans salon = partout). Même effet que +casinoset chtrade."""
         await self._set_ch(ctx, "channel_trade", channel)
+
+    @commands.command(name="setrankcasino", aliases=["setcasinorank", "setrankscasino"])
+    @commands.has_permissions(administrator=True)
+    async def setrankcasino(self, ctx, channel: discord.TextChannel = None):
+        """Définit le salon où le panel ranks casino est posté (sans salon = reset)."""
+        if channel is None:
+            await update_casino_ranks_config(ctx.guild.id, {"rank_channel_id": None, "panel_message_id": None})
+            return await ctx.send(embed=success_embed("Ranks Casino", "Salon ranks reset (partout).", await get_guild_color(ctx.guild.id)))
+        await update_casino_ranks_config(ctx.guild.id, {"rank_channel_id": str(channel.id)})
+        await ctx.send(embed=success_embed("Ranks Casino", f"Salon ranks : {channel.mention}", await get_guild_color(ctx.guild.id)))
+
+    @commands.group(name="casinoranks", aliases=["rankcasino", "rankscasino"], invoke_without_command=True)
+    async def casinoranks(self, ctx):
+        color = await get_guild_color(ctx.guild.id)
+        cfg = await get_casino_ranks_config(ctx.guild.id)
+        on = cfg.get("enabled", False)
+        ch = ctx.guild.get_channel(int(cfg["rank_channel_id"])) if cfg.get("rank_channel_id") else None
+        emb = discord.Embed(title="🏆 Ranks Casino — commandes", color=color)
+        emb.add_field(name="Statut", value="✅ Activé" if on else "❌ Désactivé", inline=True)
+        emb.add_field(name="Salon panel", value=ch.mention if ch else "—", inline=True)
+        emb.add_field(
+            name="Joueurs",
+            value="`+casinoranks me` — ton rang, bonus, progression",
+            inline=False,
+        )
+        emb.add_field(
+            name="Admin",
+            value="`+casinoranks setup` — crée les 12 rôles + hiérarchie\n"
+            "`+casinoranks panel` — poste/maj le panel\n"
+            "`+casinoranks sync [@membre]` — attribue les rangs selon net + parties\n"
+            "`+casinoranks setreq [index] [net] [parties]` — modifie un palier\n"
+            "`+setrankcasino #salon` — définit le salon panel",
+            inline=False,
+        )
+        await ctx.send(embed=emb)
+
+    async def _ranks_ensure_defaults(self, gid: int):
+        cfg = await get_casino_ranks_config(gid)
+        if not cfg.get("ranks"):
+            await update_casino_ranks_config(
+                gid,
+                {
+                    "enabled": True,
+                    "ranks": [
+                        {
+                            "emoji": r["emoji"],
+                            "name": r["name"],
+                            "color": r["color"],
+                            "role_id": None,
+                            "req_net": r["req_net"],
+                            "req_games": r["req_games"],
+                            "bonus": r["bonus"],
+                        }
+                        for r in DEFAULT_CASINO_RANKS
+                    ],
+                },
+            )
+
+    @casinoranks.command(name="setup")
+    @commands.has_permissions(administrator=True)
+    async def casinoranks_setup(self, ctx):
+        """Crée les rôles casino (emoji | nom) et les place en hiérarchie."""
+        await self._ranks_ensure_defaults(ctx.guild.id)
+        cfg = await get_casino_ranks_config(ctx.guild.id)
+        ranks = cfg.get("ranks") or []
+        if not ranks:
+            return await ctx.send(embed=error_embed("Ranks Casino", "Config introuvable."))
+        bot_me = ctx.guild.me
+        created = 0
+        updated = 0
+        for r in ranks:
+            rname = f"{r.get('emoji','🎲')} | {r.get('name','Casino')}"
+            rid = r.get("role_id")
+            role_obj = ctx.guild.get_role(int(rid)) if rid else None
+            if role_obj is None:
+                try:
+                    role_obj = await ctx.guild.create_role(
+                        name=rname[:100],
+                        colour=discord.Colour(int(r.get("color", 0x2F3136))),
+                        mentionable=False,
+                        hoist=False,
+                        reason="Setup ranks casino",
+                    )
+                    created += 1
+                except discord.HTTPException as e:
+                    return await ctx.send(embed=error_embed("Ranks Casino", f"Erreur création rôle : {e}"))
+                await update_casino_ranks_config(ctx.guild.id, {f"ranks.{ranks.index(r)}.role_id": str(role_obj.id)})
+                r["role_id"] = str(role_obj.id)
+            else:
+                try:
+                    await role_obj.edit(
+                        name=rname[:100],
+                        colour=discord.Colour(int(r.get("color", role_obj.colour.value))),
+                        reason="Maj ranks casino",
+                    )
+                    updated += 1
+                except discord.HTTPException:
+                    pass
+            if role_obj >= bot_me.top_role:
+                return await ctx.send(embed=error_embed("Ranks Casino", f"Le rôle {role_obj.mention} est au-dessus du bot. Descends le rôle du bot."))  # noqa: E501
+
+        # Positionnement: on met le rang le plus haut au-dessus des autres (mais sous le bot)
+        try:
+            base = bot_me.top_role.position - 1
+            desired = {}
+            # ranks[0] = débutant en bas, ranks[-1] en haut
+            for i, r in enumerate(ranks):
+                role_obj = ctx.guild.get_role(int(r["role_id"]))
+                if role_obj:
+                    desired[role_obj] = max(1, base - (len(ranks) - 1 - i))
+            await ctx.guild.edit_role_positions(positions=desired)
+        except discord.HTTPException:
+            pass
+
+        await update_casino_ranks_config(ctx.guild.id, {"enabled": True})
+        await ctx.send(embed=success_embed("Ranks Casino", f"✅ Setup terminé. Créés: {created} · MAJ: {updated}", await get_guild_color(ctx.guild.id)))
+
+    def _ranks_panel_embed(self, guild: discord.Guild, cfg: dict, *, net: int = 0, games: int = 0) -> discord.Embed:
+        color = 0xF1C40F
+        ranks = cfg.get("ranks") or []
+        lines = []
+        for i, r in enumerate(ranks):
+            emoji = r.get("emoji", "🎲")
+            name = r.get("name", "Casino")
+            rn = int(r.get("req_net", 0))
+            rg = int(r.get("req_games", 0))
+            rid = r.get("role_id")
+            ro = guild.get_role(int(rid)) if rid else None
+            tag = ro.mention if ro else f"`{emoji} | {name}`"
+            lines.append(f"**{i}.** {tag} — net ≥ **{rn:,}** · parties ≥ **{rg:,}**")
+        emb = discord.Embed(
+            title="🏆 Ranks Casino — progression",
+            description="\n".join(lines[:12]) if lines else "Setup requis : `+casinoranks setup`",
+            color=color,
+        )
+        if ranks:
+            idx = _casino_best_rank_index(ranks, net=net, games=games)
+            emb.set_footer(text=f"Ton net: {net:+,} · Tes parties: {games:,} · Rang actuel estimé: #{idx}")
+        return emb
+
+    @casinoranks.command(name="panel")
+    @commands.has_permissions(administrator=True)
+    async def casinoranks_panel(self, ctx):
+        await self._ranks_ensure_defaults(ctx.guild.id)
+        cfg = await get_casino_ranks_config(ctx.guild.id)
+        ch_id = cfg.get("rank_channel_id")
+        if not ch_id:
+            return await ctx.send(embed=error_embed("Ranks Casino", "Définis le salon avec `+setrankcasino #salon`."))
+        ch = ctx.guild.get_channel(int(ch_id))
+        if not isinstance(ch, discord.TextChannel):
+            return await ctx.send(embed=error_embed("Ranks Casino", "Salon introuvable."))
+        emb = self._ranks_panel_embed(ctx.guild, cfg)
+        mid = cfg.get("panel_message_id")
+        if mid:
+            try:
+                m = await ch.fetch_message(int(mid))
+                await m.edit(embed=emb, view=None)
+                await ctx.send(embed=success_embed("Ranks Casino", f"Panel mis à jour : {ch.mention}", await get_guild_color(ctx.guild.id)))
+                return
+            except Exception:
+                pass
+        m = await ch.send(embed=emb)
+        await update_casino_ranks_config(ctx.guild.id, {"panel_message_id": str(m.id), "enabled": True})
+        await ctx.send(embed=success_embed("Ranks Casino", f"Panel posté : {m.jump_url}", await get_guild_color(ctx.guild.id)))
+
+    @casinoranks.command(name="setreq")
+    @commands.has_permissions(administrator=True)
+    async def casinoranks_setreq(self, ctx, index: int, net: int, parties: int):
+        await self._ranks_ensure_defaults(ctx.guild.id)
+        cfg = await get_casino_ranks_config(ctx.guild.id)
+        ranks = cfg.get("ranks") or []
+        if index < 0 or index >= len(ranks):
+            return await ctx.send(embed=error_embed("Ranks Casino", f"Index invalide (0–{max(0, len(ranks)-1)})."))
+        ranks[index]["req_net"] = max(0, int(net))
+        ranks[index]["req_games"] = max(0, int(parties))
+        await update_casino_ranks_config(ctx.guild.id, {"ranks": ranks})
+        await ctx.send(embed=success_embed("Ranks Casino", f"✅ Palier #{index} mis à jour.", await get_guild_color(ctx.guild.id)))
+
+    @casinoranks.command(name="sync")
+    @commands.has_permissions(administrator=True)
+    async def casinoranks_sync(self, ctx, member: discord.Member = None):
+        await self._ranks_ensure_defaults(ctx.guild.id)
+        cfg = await get_casino_ranks_config(ctx.guild.id)
+        ranks = cfg.get("ranks") or []
+        if not ranks:
+            return await ctx.send(embed=error_embed("Ranks Casino", "Setup requis."))
+        role_ids = [int(r["role_id"]) for r in ranks if r.get("role_id")]
+        if not role_ids or len(role_ids) != len(ranks):
+            return await ctx.send(embed=error_embed("Ranks Casino", "Rôles manquants — lance `+casinoranks setup`."))
+
+        targets = [member] if member else [m for m in ctx.guild.members if not m.bot]
+        done = 0
+        for m in targets:
+            net, games = await _casino_get_user_net_games(ctx.guild.id, m.id)
+            idx = _casino_best_rank_index(ranks, net=net, games=games)
+            want = ctx.guild.get_role(int(ranks[idx]["role_id"]))
+            if not want:
+                continue
+            to_remove = [r for r in m.roles if r.id in role_ids and r.id != want.id]
+            try:
+                if to_remove:
+                    await m.remove_roles(*to_remove, reason="Sync ranks casino")
+                if want not in m.roles:
+                    await m.add_roles(want, reason="Sync ranks casino")
+                done += 1
+            except discord.HTTPException:
+                continue
+        await ctx.send(embed=success_embed("Ranks Casino", f"✅ Sync terminé : {done} membre(s).", await get_guild_color(ctx.guild.id)))
+
+    @casinoranks.command(name="me")
+    async def casinoranks_me(self, ctx):
+        await self._ranks_ensure_defaults(ctx.guild.id)
+        cfg = await get_casino_ranks_config(ctx.guild.id)
+        ranks = cfg.get("ranks") or []
+        net, games = await _casino_get_user_net_games(ctx.guild.id, ctx.author.id)
+        idx = _casino_best_rank_index(ranks, net=net, games=games) if ranks else 0
+        cur = ranks[idx] if ranks else None
+        bonus = await get_member_casino_rank_bonus(ctx.guild, ctx.author)
+        color = await get_guild_color(ctx.guild.id)
+        emb = discord.Embed(title="🏆 Mon rang casino", color=color)
+        if cur:
+            rid = cur.get("role_id")
+            ro = ctx.guild.get_role(int(rid)) if rid else None
+            emb.add_field(name="Rang", value=(ro.mention if ro else f"{cur.get('emoji','🎲')} | {cur.get('name','') }"), inline=False)
+        emb.add_field(name="Net", value=f"{net:+,}", inline=True)
+        emb.add_field(name="Parties", value=f"{games:,}", inline=True)
+        emb.add_field(
+            name="Bonus actifs",
+            value=f"Cooldown -{bonus['cooldown_minus']}s · Gain +{bonus['win_bonus_pct']}%\n"
+            f"Luck: slots {bonus['slots_luck']*100:.1f}% · flip {bonus['flip_luck']*100:.1f}% · pfc {bonus['pfc_luck']*100:.1f}%",
+            inline=False,
+        )
+        if ranks and idx < len(ranks) - 1:
+            nxt = ranks[idx + 1]
+            need_net = max(0, int(nxt.get("req_net", 0)) - net)
+            need_games = max(0, int(nxt.get("req_games", 0)) - games)
+            emb.add_field(
+                name="Prochain rang",
+                value=f"{nxt.get('emoji','⭐')} | {nxt.get('name','')}\n"
+                f"Manque: net **{need_net:,}** · parties **{need_games:,}**",
+                inline=False,
+            )
+        await ctx.send(embed=emb)
 
     @commands.command(name="trade")
     async def trade(self, ctx, role: discord.Role, *, message: str):
