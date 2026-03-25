@@ -147,6 +147,23 @@ class StatsCog(commands.Cog):
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
+
+class StatsPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        btn = discord.ui.Button(label="Afficher mes stats", style=discord.ButtonStyle.success, custom_id="stats:show")
+
+        async def cb(interaction: discord.Interaction):
+            if not interaction.guild:
+                return
+            await interaction.response.send_message(
+                "Utilise `+stats` pour générer tes graphiques (version bouton complète bientôt).",
+                ephemeral=True,
+            )
+
+        btn.callback = cb
+        self.add_item(btn)
+
     @commands.command(name="serverstats")
     async def serverstats(self, ctx):
         """Graphiques globaux du serveur"""
@@ -310,3 +327,4 @@ class StatsCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(StatsCog(bot))
+    bot.add_view(StatsPanelView())

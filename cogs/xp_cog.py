@@ -187,6 +187,35 @@ class XPCog(commands.Cog):
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
+
+class XPRankPanelView(discord.ui.View):
+    def __init__(self, bot):
+        super().__init__(timeout=None)
+        self.bot = bot
+        btn = discord.ui.Button(label="Afficher mon rank", style=discord.ButtonStyle.success, custom_id="xp:rank:show")
+
+        async def cb(interaction: discord.Interaction):
+            if not interaction.guild:
+                return
+            col = get_collection("xp")
+            doc = await col.find_one({"guild_id": str(interaction.guild.id), "user_id": str(interaction.user.id)})
+            xp = doc.get("xp", 0) if doc else 0
+            cursor = col.find({"guild_id": str(interaction.guild.id)}).sort("xp", -1)
+            rank_num = 1
+            async for d in cursor:
+                if d["user_id"] == str(interaction.user.id):
+                    break
+                rank_num += 1
+            cfg = await get_guild_config(interaction.guild.id)
+            xp_name = cfg.get("xp_name", "XP")
+            emb = discord.Embed(title="📊 Ton rang", color=await get_guild_color(interaction.guild.id))
+            emb.add_field(name="Classement", value=f"#{rank_num}", inline=True)
+            emb.add_field(name=xp_name, value=f"{xp:,}", inline=True)
+            await interaction.response.send_message(embed=emb, ephemeral=True)
+
+        btn.callback = cb
+        self.add_item(btn)
+
     @commands.command(name="leaderboard")
     async def leaderboard(self, ctx, page: int = 1):
         """Top 10 XP"""
@@ -268,3 +297,4 @@ class XPCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(XPCog(bot))
+    bot.add_view(XPRankPanelView(bot))

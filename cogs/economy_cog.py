@@ -118,6 +118,32 @@ class EconomyCog(commands.Cog):
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
+class BankPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        btn = discord.ui.Button(
+            label="Afficher mon compte bancaire",
+            style=discord.ButtonStyle.success,
+            custom_id="bank:show",
+        )
+
+        async def cb(interaction: discord.Interaction):
+            if not interaction.guild:
+                return
+            bal = await get_balance(interaction.guild.id, interaction.user.id)
+            conf = await get_guild_config(interaction.guild.id)
+            currency_name = conf.get("currency_name", "SayuCoins")
+            currency_emoji2 = conf.get("currency_emoji", "💰")
+            emb = discord.Embed(
+                title=f"{currency_emoji2} Ton compte bancaire",
+                description=f"**{bal:,}** {currency_name}",
+                color=await get_guild_color(interaction.guild.id),
+            )
+            await interaction.response.send_message(embed=emb, ephemeral=True)
+
+        btn.callback = cb
+        self.add_item(btn)
+
     @commands.command(name="daily")
     async def daily(self, ctx):
         """Récompense quotidienne avec streak bonus"""
@@ -360,3 +386,4 @@ class EconomyCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(EconomyCog(bot))
+    bot.add_view(BankPanelView())
