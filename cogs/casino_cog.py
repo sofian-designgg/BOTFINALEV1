@@ -1901,75 +1901,97 @@ class CasinoCog(commands.Cog):
         v = View(timeout=None)
         b = Button(label="Créer un trade", style=discord.ButtonStyle.success, custom_id="tpanel:create")
 
-        class TradeCreateModal(Modal):
-            def __init__(self):
-                super().__init__(title="Créer un trade")
-                self.role_id = TextInput(label="ID du rôle que tu proposes", placeholder="Copie l'ID du rôle", required=True, max_length=25)
-                self.msg = TextInput(label="Message", placeholder="Ce que tu veux en échange / infos", required=True, max_length=1800)
-                self.add_item(self.role_id)
-                self.add_item(self.msg)
-
-            async def on_submit(self, interaction: discord.Interaction):
-                try:
-                    rid = int(str(self.role_id.value).strip())
-                except ValueError:
-                    return await interaction.response.send_message("ID rôle invalide.", ephemeral=True)
-                role = interaction.guild.get_role(rid) if interaction.guild else None
-                if not role:
-                    return await interaction.response.send_message("Rôle introuvable.", ephemeral=True)
-                if not isinstance(interaction.user, discord.Member) or role not in interaction.user.roles:
-                    return await interaction.response.send_message("Tu dois posséder ce rôle.", ephemeral=True)
-                # Reuse trade() logique: on appelle la commande interne
-                fake_ctx = await ctx.bot.get_context(interaction.message)
-                fake_ctx.author = interaction.user
-                fake_ctx.guild = interaction.guild
-                fake_ctx.channel = interaction.channel
-                await interaction.response.defer(ephemeral=True)
-                # Post annonce + view, puis auto-delete l'annonce après 2 minutes (le fil reste)
-                tid = str(uuid.uuid4())[:10]
-                col = get_collection("role_trades")
-                if col is None:
-                    return await interaction.followup.send("DB indisponible.", ephemeral=True)
-                msg_txt = str(self.msg.value)[:2000]
-                ann = discord.Embed(
-                    title="🤝 Trade de rôles",
-                    description=f"**Auteur :** {interaction.user.mention}\n**Je propose :** {role.mention}\n\n**Message :**\n{msg_txt[:1800]}",
-                    color=await get_guild_color(interaction.guild.id),
-                )
-                ann.set_footer(text=f"ID trade: {tid}")
-                view = TradeOpenView(tid)
-                amsg = await interaction.channel.send(embed=ann, view=view)
-                ctx.bot.add_view(view)
-                await col.insert_one({
-                    "_id": tid,
-                    "guild_id": str(interaction.guild.id),
-                    "channel_id": str(interaction.channel.id),
-                    "message_id": str(amsg.id),
-                    "author_id": str(interaction.user.id),
-                    "wanted_role_id": str(role.id),
-                    "message": msg_txt,
-                    "status": "open",
-                    "claimer_id": None,
-                    "thread_id": None,
-                    "author_role_id": None,
-                    "claimer_role_id": None,
-                    "author_conf": False,
-                    "claimer_conf": False,
-                    "final_panel_sent": False,
-                })
-                try:
-                    await amsg.delete(delay=120)
-                except Exception:
-                    pass
-                await interaction.followup.send("✅ Trade créé (annonce temporaire).", ephemeral=True)
+        async def _trade_post(interaction: discord.Interaction, role: discord.Role, msg_txt: str):
+            await interaction.response.defer(ephemeral=True)
+            tid = str(uuid.uuid4())[:10]
+            col = get_collection("role_trades")
+            if col is None:
+                return await interaction.followup.send("DB indisponible.", ephemeral=True)
+            ann = discord.Embed(
+                title="🤝 Trade de rôles",
+                description=f"**Auteur :** {interaction.user.mention}\n**Je propose :** {role.mention}\n\n**Message :**\n{msg_txt[:1800]}",
+                color=await get_guild_color(interaction.guild.id),
+            )
+            ann.set_footer(text=f"ID trade: {tid}")
+            view = TradeOpenView(tid)
+            amsg = await interaction.channel.send(embed=ann, view=view)
+            ctx.bot.add_view(view)
+            await col.insert_one({
+                "_id": tid,
+                "guild_id": str(interaction.guild.id),
+                "channel_id": str(interaction.channel.id),
+                "message_id": str(amsg.id),
+                "author_id": str(interaction.user.id),
+                "wanted_role_id": str(role.id),
+                "message": msg_txt[:2000],
+                "status": "open",
+                "claimer_id": None,
+                "thread_id": None,
+                "author_role_id": None,
+                "claimer_role_id": None,
+                "author_conf": False,
+                "claimer_conf": False,
+                "final_panel_sent": False,
+            })
+            try:
+                await amsg.delete(delay=120)
+            except Exception:
+                pass
+            await interaction.followup.send("✅ Trade créé (annonce temporaire).", ephemeral=True)
 
         async def bcb(interaction: discord.Interaction):
             if not interaction.guild:
                 return
-            try:
-                await interaction.response.send_modal(TradeCreateModal())
-            except Exception:
-                await interaction.response.send_message("Impossible d’ouvrir le formulaire.", ephemeral=True)
+            member = interaction.user if isinstance(interaction.user, discord.Member) else interaction.guild.get_member(interaction.user.id)
+            if not member:
+                return await interaction.response.send_message("Membre introuvable.", ephemeral=True)
+            roles = _tradable_roles(member, interaction.guild.me)
+            if not roles:
+                return await interaction.response.send_message("Tu n’as aucun rôle échangeable.", ephemeral=True)
+            opts = [SelectOption(label=r.name[:100], value=str(r.id)) for r in roles[:25]]
+
+            sel = Select(custom_id="tpanel:role", placeholder="Choisis le rôle que tu proposes", options=opts)
+            v2 = View(timeout=120)
+            v2.add_item(sel)
+            btn2 = Button(label="Continuer", style=discord.ButtonStyle.primary)
+            v2.add_item(btn2)
+            state = {"rid": None}
+
+            async def sel_cb(i: discord.Interaction):
+                if i.user.id != member.id:
+                    return await i.response.send_message("Pas pour toi.", ephemeral=True)
+                vals = i.data.get("values") or []
+                state["rid"] = int(vals[0]) if vals else None
+                await i.response.defer(ephemeral=True)
+
+            sel.callback = sel_cb
+
+            class TradeMsgModal(Modal):
+                def __init__(self):
+                    super().__init__(title="Message de trade")
+                    self.msg = TextInput(label="Message", placeholder="Ce que tu veux en échange / infos", required=True, max_length=1800)
+                    self.add_item(self.msg)
+
+                async def on_submit(self, i2: discord.Interaction):
+                    if not state["rid"]:
+                        return await i2.response.send_message("Choisis d’abord un rôle.", ephemeral=True)
+                    role = i2.guild.get_role(int(state["rid"]))
+                    if not role or role not in member.roles:
+                        return await i2.response.send_message("Tu n’as plus ce rôle.", ephemeral=True)
+                    await _trade_post(i2, role, str(self.msg.value))
+
+            async def cont_cb(i: discord.Interaction):
+                if i.user.id != member.id:
+                    return await i.response.send_message("Pas pour toi.", ephemeral=True)
+                if not state["rid"]:
+                    return await i.response.send_message("Choisis un rôle d’abord.", ephemeral=True)
+                try:
+                    await i.response.send_modal(TradeMsgModal())
+                except Exception:
+                    await i.response.send_message("Impossible d’ouvrir le formulaire.", ephemeral=True)
+
+            btn2.callback = cont_cb
+            await interaction.response.send_message("Sélectionne ton rôle, puis continue.", ephemeral=True, view=v2)
 
         b.callback = bcb
         v.add_item(b)
@@ -1989,101 +2011,127 @@ class CasinoCog(commands.Cog):
         v = View(timeout=None)
         b = Button(label="Créer une enchère", style=discord.ButtonStyle.success, custom_id="apanel:create")
 
-        class AuctionCreateModal(Modal):
-            def __init__(self):
-                super().__init__(title="Créer une enchère")
-                self.role_id = TextInput(label="ID du rôle à vendre", placeholder="Copie l'ID du rôle", required=True, max_length=25)
-                self.start = TextInput(label="Prix de départ", placeholder="Ex: 500", required=True, max_length=12)
-                self.buyout = TextInput(label="Achat immédiat (optionnel)", placeholder="Ex: 2000", required=False, max_length=12)
-                self.add_item(self.role_id)
-                self.add_item(self.start)
-                self.add_item(self.buyout)
-
-            async def on_submit(self, interaction: discord.Interaction):
-                if not interaction.guild or not isinstance(interaction.user, discord.Member):
-                    return
+        async def _auction_post(interaction: discord.Interaction, role: discord.Role, start: int, buyout: int | None):
+            cfg = await get_casino_config(interaction.guild.id)
+            ach = cfg.get("auction_channel_id")
+            if not ach:
+                return await interaction.followup.send("Configure d’abord `+casinoset auctionchannel #salon`.", ephemeral=True)
+            if interaction.channel.id != int(ach):
+                ch = interaction.guild.get_channel(int(ach))
+                return await interaction.followup.send(f"Utilise {ch.mention}.", ephemeral=True) if ch else await interaction.followup.send("Mauvais salon.", ephemeral=True)
+            fee_pct = max(0, min(30, int(cfg.get("auction_fee_percent", 0))))
+            fee = int(start * fee_pct / 100) if fee_pct else 0
+            if fee > 0 and not await remove_coins(interaction.guild.id, interaction.user.id, fee):
+                return await interaction.followup.send(f"Frais dépôt: {fee} SC requis.", ephemeral=True)
+            aid = str(uuid.uuid4())[:12]
+            col = get_collection("role_auctions")
+            ends = datetime.now(timezone.utc) + timedelta(hours=48)
+            await col.insert_one({
+                "_id": aid,
+                "guild_id": str(interaction.guild.id),
+                "role_id": str(role.id),
+                "seller_id": str(interaction.user.id),
+                "current_bid": start,
+                "current_bidder_id": None,
+                "buyout": buyout,
+                "channel_id": str(interaction.channel.id),
+                "ends_at": ends,
+                "status": "active",
+                "thread_id": None,
+                "join_message_id": None,
+            })
+            view = AuctionBidView(aid)
+            ctx.bot.add_view(view)
+            try:
+                thread = await _create_private_thread(interaction.channel, f"Enchère {role.name}")
+                await _thread_add_user_safe(thread, interaction.user)
+                emb_th = discord.Embed(
+                    title=f"🏷️ Enchère — {role.name}",
+                    description=f"Vendeur: {interaction.user.mention}\nEnchère actuelle: **{start}**\n"
+                    f"{f'Achat immédiat: **{buyout}** — vendeur: +auctionbuyout {aid} @acheteur\\n' if buyout else ''}"
+                    f"Fin: <t:{int(ends.timestamp())}:R>\n`ID: {aid}`",
+                    color=await get_guild_color(interaction.guild.id),
+                )
+                msg = await thread.send(embed=emb_th, view=view)
+                await col.update_one({"_id": aid}, {"$set": {"message_id": str(msg.id), "thread_id": str(thread.id)}})
+                join_emb = discord.Embed(
+                    title=f"🏷️ Enchère — {role.name}",
+                    description=f"Annonce temporaire. Ouvre le fil: {thread.mention}\n`ID: {aid}`",
+                    color=await get_guild_color(interaction.guild.id),
+                )
+                link_view = View(timeout=None)
+                link_view.add_item(Button(label="Ouvrir le fil", style=discord.ButtonStyle.link, url=thread.jump_url))
+                ann = await interaction.channel.send(embed=join_emb, view=link_view)
                 try:
-                    rid = int(str(self.role_id.value).strip())
-                    start = int(str(self.start.value).replace(" ", "").replace(",", ""))
-                    bo = str(self.buyout.value).strip()
-                    buyout = int(bo.replace(" ", "").replace(",", "")) if bo else None
-                except ValueError:
-                    return await interaction.response.send_message("Chiffres invalides.", ephemeral=True)
-                role = interaction.guild.get_role(rid)
-                if not role:
-                    return await interaction.response.send_message("Rôle introuvable.", ephemeral=True)
-                if role not in interaction.user.roles:
-                    return await interaction.response.send_message("Tu dois posséder ce rôle.", ephemeral=True)
-                cfg = await get_casino_config(interaction.guild.id)
-                ach = cfg.get("auction_channel_id")
-                if not ach:
-                    return await interaction.response.send_message("Configure d’abord `+casinoset auctionchannel #salon`.", ephemeral=True)
-                if interaction.channel.id != int(ach):
-                    ch = interaction.guild.get_channel(int(ach))
-                    return await interaction.response.send_message(f"Utilise {ch.mention}.", ephemeral=True) if ch else await interaction.response.send_message("Mauvais salon.", ephemeral=True)
-                # On appelle la logique de sellrole directement (copie light)
-                await interaction.response.defer(ephemeral=True)
-                fee_pct = max(0, min(30, int(cfg.get("auction_fee_percent", 0))))
-                fee = int(start * fee_pct / 100) if fee_pct else 0
-                if fee > 0 and not await remove_coins(interaction.guild.id, interaction.user.id, fee):
-                    return await interaction.followup.send(f"Frais dépôt: {fee} SC requis.", ephemeral=True)
-                aid = str(uuid.uuid4())[:12]
-                col = get_collection("role_auctions")
-                ends = datetime.now(timezone.utc) + timedelta(hours=48)
-                await col.insert_one({
-                    "_id": aid,
-                    "guild_id": str(interaction.guild.id),
-                    "role_id": str(role.id),
-                    "seller_id": str(interaction.user.id),
-                    "current_bid": start,
-                    "current_bidder_id": None,
-                    "buyout": buyout,
-                    "channel_id": str(interaction.channel.id),
-                    "ends_at": ends,
-                    "status": "active",
-                    "thread_id": None,
-                    "join_message_id": None,
-                })
-                view = AuctionBidView(aid)
-                ctx.bot.add_view(view)
-                # fil privé enchère
-                try:
-                    thread = await _create_private_thread(interaction.channel, f"Enchère {role.name}")
-                    await _thread_add_user_safe(thread, interaction.user)
-                    emb_th = discord.Embed(
-                        title=f"🏷️ Enchère — {role.name}",
-                        description=f"Vendeur: {interaction.user.mention}\nEnchère actuelle: **{start}**\n"
-                        f"{f'Achat immédiat: **{buyout}** — vendeur: +auctionbuyout {aid} @acheteur\\n' if buyout else ''}"
-                        f"Fin: <t:{int(ends.timestamp())}:R>\n`ID: {aid}`",
-                        color=await get_guild_color(interaction.guild.id),
-                    )
-                    msg = await thread.send(embed=emb_th, view=view)
-                    await col.update_one({"_id": aid}, {"$set": {"message_id": str(msg.id), "thread_id": str(thread.id)}})
-                    # annonce temporaire avec lien fil + join button
-                    join_emb = discord.Embed(
-                        title=f"🏷️ Enchère — {role.name}",
-                        description=f"Annonce temporaire. Ouvre le fil: {thread.mention}\n`ID: {aid}`",
-                        color=await get_guild_color(interaction.guild.id),
-                    )
-                    link_view = View(timeout=None)
-                    link_view.add_item(Button(label="Ouvrir le fil", style=discord.ButtonStyle.link, url=thread.jump_url))
-                    ann = await interaction.channel.send(embed=join_emb, view=link_view)
-                    try:
-                        await ann.delete(delay=120)
-                    except Exception:
-                        pass
-                except Exception as e:
-                    await interaction.followup.send(f"Erreur création fil: {e}", ephemeral=True)
-                    return
-                await interaction.followup.send("✅ Enchère créée (annonce temporaire).", ephemeral=True)
+                    await ann.delete(delay=120)
+                except Exception:
+                    pass
+            except Exception as e:
+                return await interaction.followup.send(f"Erreur création fil: {e}", ephemeral=True)
+            await interaction.followup.send("✅ Enchère créée (annonce temporaire).", ephemeral=True)
 
         async def bcb(interaction: discord.Interaction):
             if not interaction.guild:
                 return
-            try:
-                await interaction.response.send_modal(AuctionCreateModal())
-            except Exception:
-                await interaction.response.send_message("Impossible d’ouvrir le formulaire.", ephemeral=True)
+            member = interaction.user if isinstance(interaction.user, discord.Member) else interaction.guild.get_member(interaction.user.id)
+            if not member:
+                return await interaction.response.send_message("Membre introuvable.", ephemeral=True)
+            roles = _tradable_roles(member, interaction.guild.me)
+            if not roles:
+                return await interaction.response.send_message("Tu n’as aucun rôle vendable.", ephemeral=True)
+            opts = [SelectOption(label=r.name[:100], value=str(r.id)) for r in roles[:25]]
+
+            sel = Select(custom_id="apanel:role", placeholder="Choisis le rôle à vendre", options=opts)
+            v2 = View(timeout=120)
+            v2.add_item(sel)
+            btn2 = Button(label="Continuer", style=discord.ButtonStyle.primary)
+            v2.add_item(btn2)
+            state = {"rid": None}
+
+            async def sel_cb(i: discord.Interaction):
+                if i.user.id != member.id:
+                    return await i.response.send_message("Pas pour toi.", ephemeral=True)
+                vals = i.data.get("values") or []
+                state["rid"] = int(vals[0]) if vals else None
+                await i.response.defer(ephemeral=True)
+
+            sel.callback = sel_cb
+
+            class AuctionNumbersModal(Modal):
+                def __init__(self):
+                    super().__init__(title="Prix de l'enchère")
+                    self.start = TextInput(label="Prix de départ", placeholder="Ex: 500", required=True, max_length=12)
+                    self.buyout = TextInput(label="Achat immédiat (optionnel)", placeholder="Ex: 2000", required=False, max_length=12)
+                    self.add_item(self.start)
+                    self.add_item(self.buyout)
+
+                async def on_submit(self, i2: discord.Interaction):
+                    if not state["rid"]:
+                        return await i2.response.send_message("Choisis d’abord un rôle.", ephemeral=True)
+                    try:
+                        start = int(str(self.start.value).replace(" ", "").replace(",", ""))
+                        bo = str(self.buyout.value).strip()
+                        buyout = int(bo.replace(" ", "").replace(",", "")) if bo else None
+                    except ValueError:
+                        return await i2.response.send_message("Chiffres invalides.", ephemeral=True)
+                    role = i2.guild.get_role(int(state["rid"]))
+                    if not role or role not in member.roles:
+                        return await i2.response.send_message("Tu n’as plus ce rôle.", ephemeral=True)
+                    await i2.response.defer(ephemeral=True)
+                    await _auction_post(i2, role, start, buyout)
+
+            async def cont_cb(i: discord.Interaction):
+                if i.user.id != member.id:
+                    return await i.response.send_message("Pas pour toi.", ephemeral=True)
+                if not state["rid"]:
+                    return await i.response.send_message("Choisis un rôle d’abord.", ephemeral=True)
+                try:
+                    await i.response.send_modal(AuctionNumbersModal())
+                except Exception:
+                    await i.response.send_message("Impossible d’ouvrir le formulaire.", ephemeral=True)
+
+            btn2.callback = cont_cb
+            await interaction.response.send_message("Sélectionne ton rôle, puis continue.", ephemeral=True, view=v2)
 
         b.callback = bcb
         v.add_item(b)
