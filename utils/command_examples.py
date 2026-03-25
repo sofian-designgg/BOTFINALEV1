@@ -48,7 +48,7 @@ EXAMPLES_FR: Dict[str, List[str]] = {
     "casino flip": ["casino flip 50 pile"],
     "casino pfc": ["casino pfc 100 ciseaux"],
     "casino blackjack": ["casino blackjack 200"],
-    "trade": ["trade @Fondateur Je cherche ce rôle, je propose un autre en échange"],
+    "trade": ["trade @Fondateur Je propose ce rôle, je veux un rôle en échange"],
     "tradecancel": ["tradecancel a1b2c3d4e5"],
     "sellrole": ["sellrole @Rôle 500", "sellrole @Rôle 500 2000"],
     "auctioncancel": ["auctioncancel abcdef123456"],

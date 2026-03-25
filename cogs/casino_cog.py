@@ -183,7 +183,7 @@ def _casino_help_full_embeds(color: int) -> List[discord.Embed]:
         ("`+casino blackjack [mise]`", "Blackjack avec boutons Tirer / Rester. Bust = perte de la mise ; victoire = gain net après taxe."),
         ("`+sellrole @Rôle [prix_départ] [achat_immédiat]`", "Met un rôle aux enchères (tu dois le posséder). **Sans frais de dépôt** par défaut. Commande **dans le salon enchères**."),
         ("`+auctioncancel [id]`", "Annule **ta** vente. Les admins peuvent annuler n’importe quelle enchère. Salon enchères si configuré."),
-        ("`+trade @Rôle *message*`", "Tu cherches un rôle : annonce + **un seul** partenaire répond ; fil privé, choix des rôles, double confirmation. `+tradecancel [id]` (auteur)."),
+        ("`+trade @Rôle *message*`", "Tu **proposes** un rôle que tu possèdes : annonce + **un seul** partenaire répond ; fil privé, choix du rôle en échange, double confirmation. `+tradecancel [id]` (auteur)."),
         ("**Qui peut jouer ?**", "Tout membre du serveur (avec licence bot active) peut utiliser les jeux **sans être staff**. Seules les mises comptent : si ton solde < mise min ou < mise choisie, le bot refuse."),
     ]
     lines_admin = [
@@ -331,12 +331,12 @@ class TradeFinalView(View):
 
 
 def build_trade_negotiation_view(trade_id: str, select_options: list) -> View:
-    """Menu auteur + bouton partenaire (fil privé)."""
+    """Menu partenaire + bouton auteur (fil privé)."""
     v = View(timeout=None)
     tid = trade_id
     sel = Select(
         custom_id=f"rtsela:{tid}",
-        placeholder="Auteur : choisis le rôle que tu donnes",
+        placeholder="Partenaire : choisis le rôle que tu donnes",
         options=select_options[:25],
         row=0,
     )
@@ -351,7 +351,7 @@ def build_trade_negotiation_view(trade_id: str, select_options: list) -> View:
     sel.callback = scb
     v.add_item(sel)
     btn = Button(
-        label="Je cède le rôle recherché (partenaire)",
+        label="Auteur : je confirme céder le rôle proposé",
         style=discord.ButtonStyle.primary,
         custom_id=f"rtgivew:{tid}",
         row=1,
@@ -1103,7 +1103,7 @@ class CasinoCog(commands.Cog):
 
     @commands.command(name="trade")
     async def trade(self, ctx, role: discord.Role, *, message: str):
-        """Annonce un trade de rôles : tu cherches @Rôle + message. Un seul partenaire peut répondre."""
+        """Annonce un trade de rôles : tu proposes @Rôle + message. Un seul partenaire peut répondre."""
         cfg = await get_casino_config(ctx.guild.id)
         err = await _must_be_channel(ctx, cfg, "channel_trade")
         if err:
@@ -1112,6 +1112,8 @@ class CasinoCog(commands.Cog):
             return await ctx.send(embed=error_embed("Trade", "Rôle invalide (managed ou @everyone)."))
         if role >= ctx.guild.me.top_role:
             return await ctx.send(embed=error_embed("Trade", "Le bot ne peut pas gérer ce rôle."))
+        if role not in ctx.author.roles:
+            return await ctx.send(embed=error_embed("Trade", "Tu dois **posséder** ce rôle pour le proposer."))
         if not message.strip():
             return await ctx.send(embed=error_embed("Trade", "Ajoute un message (ex. ce que tu proposes en échange)."))
         tid = str(uuid.uuid4())[:10]
@@ -1122,7 +1124,7 @@ class CasinoCog(commands.Cog):
         emb = discord.Embed(
             title="🤝 Trade de rôles",
             description=f"**Auteur :** {ctx.author.mention}\n"
-            f"**Je cherche le rôle :** {role.mention}\n\n**Message :**\n{message[:1800]}",
+            f"**Je propose le rôle :** {role.mention}\n\n**Message :**\n{message[:1800]}",
             color=color,
         )
         emb.set_footer(text=f"ID trade: {tid} · +tradecancel {tid} (auteur)")
@@ -1135,7 +1137,7 @@ class CasinoCog(commands.Cog):
             "channel_id": str(ctx.channel.id),
             "message_id": str(msg.id),
             "author_id": str(ctx.author.id),
-            "wanted_role_id": str(role.id),
+            "wanted_role_id": str(role.id),  # rôle proposé par l'auteur (clé conservée pour compat DB)
             "message": message[:2000],
             "status": "open",
             "claimer_id": None,
@@ -1242,22 +1244,20 @@ class CasinoCog(commands.Cog):
             return
         if not doc.get("author_role_id") or not doc.get("claimer_role_id"):
             return
-        if str(doc["claimer_role_id"]) != str(doc["wanted_role_id"]):
-            return
         thread = guild.get_thread(int(doc["thread_id"])) if doc.get("thread_id") else None
         if not thread:
             return
         author = guild.get_member(int(doc["author_id"]))
         claimer = guild.get_member(int(doc["claimer_id"]))
         ar = guild.get_role(int(doc["author_role_id"]))
-        wr = guild.get_role(int(doc["wanted_role_id"]))
-        if not all([author, claimer, ar, wr]):
+        cr = guild.get_role(int(doc["claimer_role_id"]))
+        if not all([author, claimer, ar, cr]):
             return
         color = await get_guild_color(guild.id)
         emb = discord.Embed(
             title="🔒 Validation finale",
             description=f"**{author.display_name}** donne : {ar.mention}\n"
-            f"**{claimer.display_name}** donne : {wr.mention}\n\n"
+            f"**{claimer.display_name}** donne : {cr.mention}\n\n"
             f"Les **deux** doivent cliquer sur **Confirmer** pour appliquer l’échange.",
             color=color,
         )
@@ -1281,16 +1281,16 @@ class CasinoCog(commands.Cog):
         author = guild.get_member(int(doc["author_id"]))
         claimer = guild.get_member(int(doc["claimer_id"]))
         ar = guild.get_role(int(doc["author_role_id"]))
-        wr = guild.get_role(int(doc["wanted_role_id"]))
+        cr = guild.get_role(int(doc["claimer_role_id"]))
         thread = panel_message.channel
-        if not all([author, claimer, ar, wr]):
+        if not all([author, claimer, ar, cr]):
             await col.update_one(
                 {"_id": trade_id},
                 {"$set": {"status": "claimed", "author_conf": False, "claimer_conf": False}},
             )
             await thread.send("Membre ou rôle introuvable — échange annulé. Réessaie ou `+tradecancel`.")
             return
-        if ar not in author.roles or wr not in claimer.roles:
+        if ar not in author.roles or cr not in claimer.roles:
             await col.update_one(
                 {"_id": trade_id},
                 {"$set": {"status": "claimed", "author_conf": False, "claimer_conf": False}},
@@ -1300,8 +1300,8 @@ class CasinoCog(commands.Cog):
         try:
             await author.remove_roles(ar, reason="Trade rôles")
             await claimer.add_roles(ar, reason="Trade rôles")
-            await claimer.remove_roles(wr, reason="Trade rôles")
-            await author.add_roles(wr, reason="Trade rôles")
+            await claimer.remove_roles(cr, reason="Trade rôles")
+            await author.add_roles(cr, reason="Trade rôles")
         except discord.HTTPException as e:
             await col.update_one(
                 {"_id": trade_id},
@@ -1315,7 +1315,7 @@ class CasinoCog(commands.Cog):
         except discord.HTTPException:
             pass
         await thread.send(
-            f"✅ **Échange terminé** : {author.mention} a reçu {wr.mention}, {claimer.mention} a reçu {ar.mention}."
+            f"✅ **Échange terminé** : {author.mention} a reçu {cr.mention}, {claimer.mention} a reçu {ar.mention}."
         )
 
     async def _handle_rtclaim(self, interaction: discord.Interaction, trade_id: str):
@@ -1334,16 +1334,9 @@ class CasinoCog(commands.Cog):
         if str(interaction.user.id) == doc["author_id"]:
             await interaction.followup.send("Tu ne peux pas répondre à ton propre trade.", ephemeral=True)
             return
-        wanted = interaction.guild.get_role(int(doc["wanted_role_id"]))
-        if not wanted:
-            await interaction.followup.send("Rôle demandé introuvable.", ephemeral=True)
-            return
         member = interaction.user if isinstance(interaction.user, discord.Member) else interaction.guild.get_member(interaction.user.id)
-        if not member or wanted not in member.roles:
-            await interaction.followup.send(
-                f"Il te faut le rôle {wanted.mention} pour répondre à ce trade.",
-                ephemeral=True,
-            )
+        if not member:
+            await interaction.followup.send("Membre introuvable.", ephemeral=True)
             return
         result = await col.update_one(
             {"_id": trade_id, "guild_id": str(interaction.guild.id), "status": "open"},
@@ -1391,32 +1384,46 @@ class CasinoCog(commands.Cog):
                 except discord.HTTPException:
                     pass
             return
+        offered = interaction.guild.get_role(int(doc["wanted_role_id"]))  # rôle proposé par l'auteur
+        if not offered:
+            await col.update_one({"_id": trade_id}, {"$set": {"status": "open", "claimer_id": None}})
+            await interaction.followup.send("Rôle proposé introuvable — trade réouvert.", ephemeral=True)
+            return
+        if offered not in author.roles:
+            await col.update_one({"_id": trade_id}, {"$set": {"status": "open", "claimer_id": None}})
+            await interaction.followup.send("L’auteur n’a plus le rôle proposé — trade réouvert.", ephemeral=True)
+            return
+        if offered >= interaction.guild.me.top_role or offered.managed or offered.is_default():
+            await col.update_one({"_id": trade_id}, {"$set": {"status": "open", "claimer_id": None}})
+            await interaction.followup.send("Le bot ne peut plus gérer ce rôle — trade réouvert.", ephemeral=True)
+            return
+
         aroles = _tradable_roles(author, bot_me)
         croles = _tradable_roles(member, bot_me)
         color = await get_guild_color(interaction.guild.id)
         emb = discord.Embed(
             title="🤝 Trade — négociation",
             description=f"**Auteur :** {author.mention}\n**Partenaire :** {member.mention}\n\n"
-            f"**Rôle recherché :** {wanted.mention}\n\n"
-            f"**Rôles échangeables (auteur) :**\n{(', '.join(r.mention for r in aroles) or '*(aucun)*')}\n\n"
-            f"**Rôles échangeables (partenaire) :**\n{(', '.join(r.mention for r in croles) or '*(aucun)*')}",
+            f"**Rôle proposé (auteur) :** {offered.mention}\n\n"
+            f"**Rôles échangeables (partenaire) :**\n{(', '.join(r.mention for r in croles) or '*(aucun)*')}\n\n"
+            f"**Rôles échangeables (auteur) :**\n{(', '.join(r.mention for r in aroles) or '*(aucun)*')}",
             color=color,
         )
         emb.add_field(
             name="Étapes",
-            value="1. **Auteur** : menu déroulant — rôle que tu donnes.\n"
-            "2. **Partenaire** : bouton **Je cède le rôle recherché**.\n"
+            value="1. **Partenaire** : menu déroulant — rôle que tu donnes.\n"
+            "2. **Auteur** : bouton **je confirme céder le rôle proposé**.\n"
             "3. Double confirmation pour appliquer l’échange.",
             inline=False,
         )
-        if not aroles:
+        if not croles:
             await thread.send(
                 embed=emb,
-                content="⚠️ L’auteur n’a aucun rôle échangeable — utilise `+tradecancel` ou ajoute un rôle au bot.",
+                content="⚠️ Le partenaire n’a aucun rôle échangeable — annule ou change de partenaire.",
             )
-            await interaction.followup.send(f"Fil créé : {thread.mention} (bloqué : pas de rôle à offrir).", ephemeral=True)
+            await interaction.followup.send(f"Fil créé : {thread.mention} (bloqué : partenaire sans rôle à offrir).", ephemeral=True)
             return
-        opts = [SelectOption(label=r.name[:100], value=str(r.id)) for r in aroles[:25]]
+        opts = [SelectOption(label=r.name[:100], value=str(r.id)) for r in croles[:25]]
         nv = build_trade_negotiation_view(trade_id, opts)
         self.bot.add_view(nv)
         await thread.send(embed=emb, view=nv)
@@ -1439,8 +1446,8 @@ class CasinoCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        if str(interaction.user.id) != doc["author_id"]:
-            await interaction.response.send_message("Seul l’auteur du trade utilise ce menu.", ephemeral=True)
+        if str(interaction.user.id) != doc.get("claimer_id"):
+            await interaction.response.send_message("Seul le partenaire utilise ce menu.", ephemeral=True)
             return
         vals = interaction.data.get("values") or []
         if not vals:
@@ -1448,14 +1455,14 @@ class CasinoCog(commands.Cog):
             return
         rid = int(vals[0])
         role = interaction.guild.get_role(rid)
-        author = interaction.guild.get_member(int(doc["author_id"]))
-        if not role or not author or role not in author.roles or role.managed or role.is_default():
+        claimer = interaction.guild.get_member(int(doc["claimer_id"]))
+        if not role or not claimer or role not in claimer.roles or role.managed or role.is_default():
             await interaction.response.send_message("Rôle invalide.", ephemeral=True)
             return
         if role >= interaction.guild.me.top_role:
             await interaction.response.send_message("Le bot ne peut pas transférer ce rôle.", ephemeral=True)
             return
-        await col.update_one({"_id": trade_id}, {"$set": {"author_role_id": str(rid)}})
+        await col.update_one({"_id": trade_id}, {"$set": {"claimer_role_id": str(rid)}})
         await interaction.response.send_message(f"✅ Tu offres : {role.mention}.", ephemeral=True)
         await self._trade_try_final_panel(interaction.guild, trade_id)
 
@@ -1476,19 +1483,19 @@ class CasinoCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        if str(interaction.user.id) != doc.get("claimer_id"):
-            await interaction.response.send_message("Seul le partenaire utilise ce bouton.", ephemeral=True)
+        if str(interaction.user.id) != doc.get("author_id"):
+            await interaction.response.send_message("Seul l’auteur utilise ce bouton.", ephemeral=True)
             return
-        wanted = interaction.guild.get_role(int(doc["wanted_role_id"]))
-        claimer = interaction.guild.get_member(int(doc["claimer_id"]))
-        if not wanted or not claimer or wanted not in claimer.roles:
-            await interaction.response.send_message("Tu n’as plus le rôle demandé.", ephemeral=True)
+        offered = interaction.guild.get_role(int(doc["wanted_role_id"]))
+        author = interaction.guild.get_member(int(doc["author_id"]))
+        if not offered or not author or offered not in author.roles:
+            await interaction.response.send_message("Tu n’as plus le rôle proposé.", ephemeral=True)
             return
-        if wanted >= interaction.guild.me.top_role:
+        if offered >= interaction.guild.me.top_role:
             await interaction.response.send_message("Le bot ne peut pas transférer ce rôle.", ephemeral=True)
             return
-        await col.update_one({"_id": trade_id}, {"$set": {"claimer_role_id": str(wanted.id)}})
-        await interaction.response.send_message(f"✅ Tu confirmes céder {wanted.mention}.", ephemeral=True)
+        await col.update_one({"_id": trade_id}, {"$set": {"author_role_id": str(offered.id)}})
+        await interaction.response.send_message(f"✅ Tu confirmes céder {offered.mention}.", ephemeral=True)
         await self._trade_try_final_panel(interaction.guild, trade_id)
 
     async def _handle_rtconf(self, interaction: discord.Interaction, trade_id: str, side: str):
