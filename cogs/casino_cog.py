@@ -13,7 +13,7 @@ from discord.ext import commands
 from discord.ui import Button, View, Select
 
 from database import get_collection, is_connected
-from utils.embeds import success_embed, error_embed
+from utils.embeds import success_embed, error_embed, get_progress_bar
 from utils.guild_config import get_guild_config, get_guild_color
 from cogs.economy_cog import get_balance, add_coins, remove_coins
 
@@ -909,6 +909,34 @@ class CasinoCog(commands.Cog):
         embed.add_field(name="Total gagné (après taxe)", value=f"{won:,}", inline=True)
         embed.add_field(name="Net", value=f"{net:+,}", inline=True)
         embed.add_field(name="Parties", value=str(g), inline=True)
+        # Progression vers le prochain rank casino (net + parties)
+        await self._ranks_ensure_defaults(ctx.guild.id)
+        rcfg = await get_casino_ranks_config(ctx.guild.id)
+        ranks = rcfg.get("ranks") or []
+        if rcfg.get("enabled") and ranks and len(ranks) >= 2:
+            idx = _casino_best_rank_index(ranks, net=int(net), games=int(g))
+            if idx < len(ranks) - 1:
+                nxt = ranks[idx + 1]
+                need_net_total = max(1, int(nxt.get("req_net", 0)))
+                need_games_total = max(1, int(nxt.get("req_games", 0)))
+                p_net = min(1.0, max(0.0, (int(net) / need_net_total)))
+                p_games = min(1.0, max(0.0, (int(g) / need_games_total)))
+                # % global = le plus lent des deux (il faut valider net ET parties)
+                p = min(p_net, p_games)
+                bar = get_progress_bar(int(p * 100), 100, length=18)
+                need_net = max(0, need_net_total - int(net))
+                need_games = max(0, need_games_total - int(g))
+                embed.add_field(
+                    name="🏆 Progression vers le prochain rang",
+                    value=f"{bar}\nManque : net **{need_net:,}** · parties **{need_games:,}**",
+                    inline=False,
+                )
+            else:
+                embed.add_field(
+                    name="🏆 Rang",
+                    value="Tu es au **rang maximum**.",
+                    inline=False,
+                )
         await ctx.send(embed=embed)
 
     @commands.group(name="casino", invoke_without_command=True)
