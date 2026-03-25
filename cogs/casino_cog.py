@@ -10,7 +10,7 @@ from typing import List, Optional
 import discord
 from discord import InteractionType, SelectOption
 from discord.ext import commands
-from discord.ui import Button, View, Select
+from discord.ui import Button, View, Select, Modal, TextInput
 
 from database import get_collection, is_connected
 from utils.embeds import success_embed, error_embed, get_progress_bar
@@ -35,6 +35,8 @@ DEFAULT_CASINO = {
     "games": {"slots": True, "flip": True, "blackjack": True, "pfc": True},
     "auction_fee_percent": 0,
     "bid_increment_min": 100,
+    "last_games_channel_id": None,
+    "last_games_message_id": None,
 }
 
 
@@ -79,6 +81,51 @@ async def update_casino_config(gid: int, data: dict):
     if col is None:
         return
     await col.update_one({"_id": str(gid)}, {"$set": data}, upsert=True)
+
+
+async def _update_last_games_message(guild: discord.Guild, entry: str):
+    """Met à jour le message 'Dernières parties' (si configuré)."""
+    cfg = await get_casino_config(guild.id)
+    cid = cfg.get("last_games_channel_id")
+    if not cid:
+        return
+    ch = guild.get_channel(int(cid))
+    if not isinstance(ch, discord.TextChannel):
+        return
+    mid = cfg.get("last_games_message_id")
+    color = await get_guild_color(guild.id)
+    title = "🕘 Dernières parties — Casino"
+    # On stocke l'historique en mémoire DB (casino_config) pour éviter de fetch+parser le message
+    col = get_collection("casino_last_games")
+    if col is None:
+        return
+    await col.update_one(
+        {"_id": str(guild.id)},
+        {"$push": {"lines": {"$each": [entry], "$slice": -15}}},
+        upsert=True,
+    )
+    doc = await col.find_one({"_id": str(guild.id)}) or {}
+    lines = doc.get("lines", [])
+    desc = "\n".join(lines) if lines else "Aucune partie pour le moment."
+    emb = discord.Embed(title=title, description=desc, color=color)
+    emb.set_footer(text="Auto update • configure: +casinoset lastgames #salon")
+    msg = None
+    if mid:
+        try:
+            msg = await ch.fetch_message(int(mid))
+        except Exception:
+            msg = None
+    if msg:
+        try:
+            await msg.edit(embed=emb, view=None)
+        except Exception:
+            pass
+    else:
+        try:
+            m = await ch.send(embed=emb)
+            await update_casino_config(guild.id, {"last_games_message_id": str(m.id)})
+        except Exception:
+            pass
 
 
 async def inc_casino_stat(gid: int, uid: int, wagered: int = 0, won: int = 0):
@@ -296,6 +343,7 @@ def _casino_help_full_embeds(color: int) -> List[discord.Embed]:
         ("`+auctioncancel [id]`", "Annule **ta** vente. Les admins peuvent annuler n’importe quelle enchère. Salon enchères si configuré."),
         ("`+trade @Rôle *message*`", "Tu **proposes** un rôle que tu possèdes : annonce + **un seul** partenaire répond ; fil privé, choix du rôle en échange, double confirmation. `+tradecancel [id]` (auteur)."),
         ("`+casinoranks me`", "Ton rang casino, tes bonus, et ta progression vers le prochain grade."),
+        ("`+hierarchie`", "Liste complète des ranks casino (index + descriptifs + bonus)."),
         ("**Qui peut jouer ?**", "Tout membre du serveur (avec licence bot active) peut utiliser les jeux **sans être staff**. Seules les mises comptent : si ton solde < mise min ou < mise choisie, le bot refuse."),
     ]
     lines_admin = [
@@ -329,6 +377,8 @@ def _casino_help_full_embeds(color: int) -> List[discord.Embed]:
         ("`+casinoranks panel`", "Poste / met à jour le panel de progression (embed) dans le salon ranks."),
         ("`+casinoranks sync`", "Attribue le bon rang à tous (ou un membre) selon net + parties."),
         ("`+casinoranks setreq [index] [net] [parties]`", "Modifie les conditions d’un rang (0–11)."),
+        ("`+casinoset lastgames [#salon]`", "Active le message auto « Dernières parties » dans un salon (sans salon = off)."),
+        ("`+embedslots` `+embedflip` `+embedpfc`", "Poste des panneaux de jeux (embed + bouton) qui créent un fil privé pour chaque partie."),
     ]
     emb1 = discord.Embed(title="📜 Liste complète — Joueurs", color=color)
     emb1.description = "\n\n".join(f"**{cmd}**\n{desc}" for cmd, desc in lines_joueurs)
@@ -410,6 +460,49 @@ def _tradable_roles(member: discord.Member, bot_me: discord.Member) -> List[disc
         roles.append(r)
     roles.sort(key=lambda x: x.position, reverse=True)
     return roles[:25]
+
+
+class CasinoGameBetModal(Modal):
+    def __init__(self, game: str):
+        super().__init__(title=f"Mise — {game}")
+        self.game = game
+        self.bet = TextInput(label="Combien tu mises ?", placeholder="Ex: 100", required=True, max_length=12)
+        self.choice = TextInput(
+            label="Choix (si nécessaire)",
+            placeholder="flip: pile/face • pfc: pierre/feuille/ciseaux • slots/bj: laisse vide",
+            required=False,
+            max_length=20,
+        )
+        self.add_item(self.bet)
+        self.add_item(self.choice)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        cog = interaction.client.get_cog("CasinoCog")
+        if not cog:
+            return await interaction.response.send_message("Erreur interne.", ephemeral=True)
+        await cog._handle_game_modal_submit(interaction, self.game, str(self.bet.value), str(self.choice.value or ""))
+
+
+class CasinoGameEntryView(View):
+    def __init__(self, game: str):
+        super().__init__(timeout=None)
+        self.game = game
+        btn = Button(
+            label="🎮 Lancer une partie",
+            style=discord.ButtonStyle.success,
+            custom_id=f"cg:start:{game}",
+        )
+
+        async def cb(interaction: discord.Interaction):
+            if not interaction.guild:
+                return
+            try:
+                await interaction.response.send_modal(CasinoGameBetModal(game))
+            except discord.HTTPException:
+                await interaction.response.send_message("Impossible d’ouvrir le formulaire.", ephemeral=True)
+
+        btn.callback = cb
+        self.add_item(btn)
 
 
 class TradeOpenView(View):
@@ -619,6 +712,12 @@ class CasinoCog(commands.Cog):
             inline=False,
         )
         embed.add_field(
+            name="✨ Panels de jeux (embed + bouton)",
+            value="`+embedslots` `+embedflip` `+embedpfc` — poste un panneau qui lance une partie en **fil privé**.\n"
+            "`+casinoset lastgames #salon` — message auto « Dernières parties ».",
+            inline=False,
+        )
+        embed.add_field(
             name="🏷️ Enchères de rôles",
             value="`+sellrole` et `+auctioncancel` dans le salon **enchères** (`+casinoset auctionchannel`). "
             "Boutons +100 / +500 / +1000 / achat immédiat.",
@@ -731,6 +830,15 @@ class CasinoCog(commands.Cog):
     async def cs_bid(self, ctx, n: int):
         await update_casino_config(ctx.guild.id, {"bid_increment_min": max(1, n)})
         await ctx.send(embed=success_embed("Casino", f"Enchère min. par clic : **{n}**", await get_guild_color(ctx.guild.id)))
+
+    @casinoset.command(name="lastgames")
+    async def cs_lastgames(self, ctx, channel: discord.TextChannel = None):
+        """Définit le salon du message 'Dernières parties' (sans salon = reset)."""
+        if channel is None:
+            await update_casino_config(ctx.guild.id, {"last_games_channel_id": None, "last_games_message_id": None})
+            return await ctx.send(embed=success_embed("Casino", "Dernières parties : désactivé.", await get_guild_color(ctx.guild.id)))
+        await update_casino_config(ctx.guild.id, {"last_games_channel_id": channel.id, "last_games_message_id": None})
+        await ctx.send(embed=success_embed("Casino", f"Dernières parties → {channel.mention}", await get_guild_color(ctx.guild.id)))
 
     @casinoset.command(name="auctionchannel")
     async def cs_auch(self, ctx, channel: discord.TextChannel):
@@ -974,6 +1082,14 @@ class CasinoCog(commands.Cog):
         if net:
             await add_coins(ctx.guild.id, ctx.author.id, net)
         await inc_casino_stat(ctx.guild.id, ctx.author.id, wagered=mise, won=net)
+        await self._ranks_autosync_member(ctx.author)
+        try:
+            await _update_last_games_message(
+                ctx.guild,
+                f"<t:{int(datetime.now(timezone.utc).timestamp())}:t> 🎰 {ctx.author.mention} mise **{mise}** → net **{net}**",
+            )
+        except Exception:
+            pass
         conf = await get_guild_config(ctx.guild.id) or {}
         emoji = conf.get("currency_emoji", "💰")
         color = await get_guild_color(ctx.guild.id)
@@ -1007,6 +1123,14 @@ class CasinoCog(commands.Cog):
         if net:
             await add_coins(ctx.guild.id, ctx.author.id, net)
         await inc_casino_stat(ctx.guild.id, ctx.author.id, wagered=mise, won=net)
+        await self._ranks_autosync_member(ctx.author)
+        try:
+            await _update_last_games_message(
+                ctx.guild,
+                f"<t:{int(datetime.now(timezone.utc).timestamp())}:t> 🪙 {ctx.author.mention} mise **{mise}** → net **{net}**",
+            )
+        except Exception:
+            pass
         conf = await get_guild_config(ctx.guild.id) or {}
         color = await get_guild_color(ctx.guild.id)
         embed = discord.Embed(
@@ -1054,6 +1178,14 @@ class CasinoCog(commands.Cog):
             net = 0
             await inc_casino_stat(ctx.guild.id, ctx.author.id, wagered=mise, won=0)
             msg = "Défaite"
+        await self._ranks_autosync_member(ctx.author)
+        try:
+            await _update_last_games_message(
+                ctx.guild,
+                f"<t:{int(datetime.now(timezone.utc).timestamp())}:t> ✂️ {ctx.author.mention} mise **{mise}** → {msg} (net **{net}**)",
+            )
+        except Exception:
+            pass
         conf = await get_guild_config(ctx.guild.id) or {}
         color = await get_guild_color(ctx.guild.id)
         embed = discord.Embed(
@@ -1106,6 +1238,16 @@ class CasinoCog(commands.Cog):
 
             async def finish_loss(self, interaction):
                 await inc_casino_stat(gid, uid, wagered=mise, won=0)
+                cog = interaction.client.get_cog("CasinoCog")
+                if cog and isinstance(interaction.user, discord.Member):
+                    await cog._ranks_autosync_member(interaction.user)
+                    try:
+                        await _update_last_games_message(
+                            interaction.guild,
+                            f"<t:{int(datetime.now(timezone.utc).timestamp())}:t> 🃏 {interaction.user.mention} mise **{mise}** → Bust (net **0**)",
+                        )
+                    except Exception:
+                        pass
                 for c in self.children:
                     c.disabled = True
                 await interaction.response.edit_message(embed=discord.Embed(title="🃏 Blackjack", description="Bust — perdu.", color=0xED4245), view=self)
@@ -1147,6 +1289,16 @@ class CasinoCog(commands.Cog):
                     await add_coins(gid, uid, mise)
                     net = mise
                 await inc_casino_stat(gid, uid, wagered=mise, won=net)
+                cog = interaction.client.get_cog("CasinoCog")
+                if cog and isinstance(interaction.user, discord.Member):
+                    await cog._ranks_autosync_member(interaction.user)
+                    try:
+                        await _update_last_games_message(
+                            interaction.guild,
+                            f"<t:{int(datetime.now(timezone.utc).timestamp())}:t> 🃏 {interaction.user.mention} mise **{mise}** → net **{net}**",
+                        )
+                    except Exception:
+                        pass
                 clr = 0x57F287 if pv > dv or dv > 21 else 0x5865F2 if pv == dv else 0xED4245
                 await interaction.response.edit_message(
                     embed=discord.Embed(title="🃏 Blackjack", description=f"Vous: {self.player} ({pv})\nCroupier: {self.dealer} ({dv})\n**Net: {net}**", color=clr),
@@ -1352,6 +1504,31 @@ class CasinoCog(commands.Cog):
                     ],
                 },
             )
+
+    async def _ranks_autosync_member(self, member: discord.Member):
+        """Assigne automatiquement le bon rôle casino à un membre (si activé)."""
+        cfg = await get_casino_ranks_config(member.guild.id)
+        if not cfg.get("enabled"):
+            return
+        ranks = cfg.get("ranks") or []
+        if not ranks:
+            return
+        if not all(r.get("role_id") for r in ranks):
+            return
+        net, games = await _casino_get_user_net_games(member.guild.id, member.id)
+        idx = _casino_best_rank_index(ranks, net=net, games=games)
+        want = member.guild.get_role(int(ranks[idx]["role_id"]))
+        if not want:
+            return
+        role_ids = {int(r["role_id"]) for r in ranks if r.get("role_id")}
+        to_remove = [r for r in member.roles if r.id in role_ids and r.id != want.id]
+        try:
+            if to_remove:
+                await member.remove_roles(*to_remove, reason="Auto ranks casino")
+            if want not in member.roles:
+                await member.add_roles(want, reason="Auto ranks casino")
+        except discord.HTTPException:
+            return
 
     @casinoranks.command(name="setup")
     @commands.has_permissions(administrator=True)
@@ -2110,6 +2287,190 @@ class CasinoCog(commands.Cog):
         except Exception:
             pass
         await interaction.followup.send("✅ Offre acceptée (voir le fil).", ephemeral=True)
+
+    async def _handle_game_modal_submit(self, interaction: discord.Interaction, game: str, bet_raw: str, choice_raw: str):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Hors serveur.", ephemeral=True)
+        game = (game or "").lower().strip()
+        if game not in ("slots", "flip", "pfc", "blackjack"):
+            return await interaction.response.send_message("Jeu invalide.", ephemeral=True)
+        try:
+            bet = int(str(bet_raw).replace(" ", "").replace(",", ""))
+        except ValueError:
+            return await interaction.response.send_message("Mise invalide.", ephemeral=True)
+        cfg = await get_casino_config(interaction.guild.id)
+        # validate_bet attend un ctx classique; on refait les checks essentiels ici
+        if not cfg.get("enabled", True):
+            return await interaction.response.send_message("Casino désactivé.", ephemeral=True)
+        if bet < int(cfg["min_bet"]) or bet > int(cfg["max_bet"]):
+            return await interaction.response.send_message(
+                f"Mise autorisée: **{cfg['min_bet']}–{cfg['max_bet']}**", ephemeral=True
+            )
+        bal = await get_balance(interaction.guild.id, interaction.user.id)
+        if bal < bet:
+            return await interaction.response.send_message("Solde insuffisant.", ephemeral=True)
+        # Cooldown (avec bonus rank)
+        bonus = await get_member_casino_rank_bonus(interaction.guild, interaction.user)
+        eff_cd = max(1, int(cfg["cooldown_seconds"]) - int(bonus.get("cooldown_minus", 0)))
+        ok_cd, left = await check_casino_cooldown(interaction.guild.id, interaction.user.id, game, eff_cd)
+        if not ok_cd:
+            return await interaction.response.send_message(f"Cooldown : **{left}s**", ephemeral=True)
+        used = await get_daily_count(interaction.guild.id, interaction.user.id)
+        if used >= int(cfg["daily_game_limit"]):
+            return await interaction.response.send_message("Limite journalière atteinte.", ephemeral=True)
+
+        parent = interaction.channel
+        if not isinstance(parent, discord.TextChannel):
+            return await interaction.response.send_message("Utilise un salon texte.", ephemeral=True)
+        try:
+            thread = await _create_private_thread(parent, f"{game}-{interaction.user.display_name}")
+            await _thread_add_user_safe(thread, interaction.user)
+        except Exception:
+            return await interaction.response.send_message("Impossible de créer le fil privé.", ephemeral=True)
+
+        # Paiement + partie
+        if not await remove_coins(interaction.guild.id, interaction.user.id, bet):
+            try:
+                await thread.edit(archived=True, locked=True)
+            except Exception:
+                pass
+            return await interaction.response.send_message("Paiement impossible.", ephemeral=True)
+        await inc_daily_count(interaction.guild.id, interaction.user.id)
+
+        choice = (choice_raw or "").lower().strip()
+        currency = (await get_guild_config(interaction.guild.id) or {}).get("currency_emoji", "💰")
+        color = await get_guild_color(interaction.guild.id)
+
+        # Résolution
+        net = 0
+        title = ""
+        desc = ""
+        if game == "slots":
+            luck = max(0.0, float(bonus.get("slots_luck", 0.0)))
+            symbols = ["🍒", "🍋", "🍊", "💎", "7️⃣"]
+            w = [1.0, 1.0, 1.0, 0.6 + (luck * 6.0), 0.35 + (luck * 6.0)]
+            a, b, c = random.choices(symbols, weights=w, k=3)
+            mult = 0
+            if a == b == c:
+                mult = 10 if a == "7️⃣" else 8
+            elif a == b or b == c or a == c:
+                mult = 2
+            gross = bet * mult if mult else 0
+            net = await take_house_fee(gross, cfg["house_fee_percent"])
+            net = apply_rank_win_bonus(net, int(bonus.get("win_bonus_pct", 0)))
+            if net:
+                await add_coins(interaction.guild.id, interaction.user.id, net)
+            await inc_casino_stat(interaction.guild.id, interaction.user.id, wagered=bet, won=net)
+            title = "🎰 Slots"
+            desc = f"| {a} | {b} | {c} |\n\n" + ("🎉 JACKPOT !" if mult >= 8 else "✅ Gain !" if mult else "😢 Perdu")
+        elif game == "flip":
+            if choice not in ("pile", "face"):
+                await add_coins(interaction.guild.id, interaction.user.id, bet)
+                return await interaction.response.send_message("Choix invalide (pile/face).", ephemeral=True)
+            luck = max(0.0, float(bonus.get("flip_luck", 0.0)))
+            if luck and random.random() < luck:
+                result = choice
+            else:
+                result = random.choice(["pile", "face"])
+            win = (choice == result)
+            gross = bet * 2 if win else 0
+            net = await take_house_fee(gross, cfg["house_fee_percent"]) if win else 0
+            net = apply_rank_win_bonus(net, int(bonus.get("win_bonus_pct", 0))) if win else 0
+            if net:
+                await add_coins(interaction.guild.id, interaction.user.id, net)
+            await inc_casino_stat(interaction.guild.id, interaction.user.id, wagered=bet, won=net)
+            title = "🪙 Pile ou face"
+            desc = f"Choix: **{choice}**\nRésultat: **{result}**\n" + ("✅ Gagné" if win else "❌ Perdu")
+        elif game == "pfc":
+            PFC = {"pierre": "🪨", "feuille": "📄", "ciseaux": "✂️"}
+            if choice not in PFC:
+                await add_coins(interaction.guild.id, interaction.user.id, bet)
+                return await interaction.response.send_message("Choix invalide (pierre/feuille/ciseaux).", ephemeral=True)
+            luck = max(0.0, float(bonus.get("pfc_luck", 0.0)))
+            wins = {"pierre": "ciseaux", "feuille": "pierre", "ciseaux": "feuille"}
+            if luck and random.random() < luck:
+                bot_c = wins[choice]
+            else:
+                bot_c = random.choice(list(PFC.keys()))
+            if choice == bot_c:
+                await add_coins(interaction.guild.id, interaction.user.id, bet)
+                await inc_casino_stat(interaction.guild.id, interaction.user.id, wagered=bet, won=bet)
+                title = "✂️ PFC"
+                desc = f"Toi: {PFC[choice]}  vs  Bot: {PFC[bot_c]}\n🤝 Égalité — mise rendue"
+                net = 0
+            elif wins[choice] == bot_c:
+                gross = bet * 2
+                net = await take_house_fee(gross, cfg["house_fee_percent"])
+                net = apply_rank_win_bonus(net, int(bonus.get("win_bonus_pct", 0)))
+                await add_coins(interaction.guild.id, interaction.user.id, net)
+                await inc_casino_stat(interaction.guild.id, interaction.user.id, wagered=bet, won=net)
+                title = "✂️ PFC"
+                desc = f"Toi: {PFC[choice]}  vs  Bot: {PFC[bot_c]}\n✅ Victoire"
+            else:
+                await inc_casino_stat(interaction.guild.id, interaction.user.id, wagered=bet, won=0)
+                title = "✂️ PFC"
+                desc = f"Toi: {PFC[choice]}  vs  Bot: {PFC[bot_c]}\n❌ Défaite"
+                net = 0
+        else:
+            # blackjack embed-flow : on renvoie vers la commande classique (déjà interactive)
+            await add_coins(interaction.guild.id, interaction.user.id, bet)
+            return await interaction.response.send_message("Blackjack embed arrive après (prochaine maj).", ephemeral=True)
+
+        await self._ranks_autosync_member(interaction.user)
+        try:
+            await _update_last_games_message(
+                interaction.guild,
+                f"<t:{int(datetime.now(timezone.utc).timestamp())}:t> {title.split()[0]} {interaction.user.mention} mise **{bet}** → net **{net}**",
+            )
+        except Exception:
+            pass
+
+        emb = discord.Embed(title=title, description=f"{desc}\n\nMise **{bet}** → Net **{net}** {currency}", color=color)
+        await thread.send(embed=emb)
+        try:
+            await thread.edit(archived=True, locked=True)
+        except Exception:
+            pass
+        await interaction.response.send_message(f"✅ Partie créée : {thread.mention}", ephemeral=True)
+
+    @commands.command(name="embedslots")
+    @commands.has_permissions(administrator=True)
+    async def embedslots(self, ctx):
+        color = await get_guild_color(ctx.guild.id)
+        emb = discord.Embed(
+            title="🎰 Slots — Lance une partie",
+            description="Clique sur **Lancer une partie**, choisis ta mise, et le bot crée un **fil privé**.",
+            color=color,
+        )
+        v = CasinoGameEntryView("slots")
+        self.bot.add_view(v)
+        await ctx.send(embed=emb, view=v)
+
+    @commands.command(name="embedflip")
+    @commands.has_permissions(administrator=True)
+    async def embedflip(self, ctx):
+        color = await get_guild_color(ctx.guild.id)
+        emb = discord.Embed(
+            title="🪙 Pile ou face — Lance une partie",
+            description="Clique sur **Lancer une partie**, entre ta mise et ton choix (**pile**/**face**) → fil privé.",
+            color=color,
+        )
+        v = CasinoGameEntryView("flip")
+        self.bot.add_view(v)
+        await ctx.send(embed=emb, view=v)
+
+    @commands.command(name="embedpfc")
+    @commands.has_permissions(administrator=True)
+    async def embedpfc(self, ctx):
+        color = await get_guild_color(ctx.guild.id)
+        emb = discord.Embed(
+            title="✂️ PFC — Lance une partie",
+            description="Clique sur **Lancer une partie**, mise + choix (**pierre/feuille/ciseaux**) → fil privé.",
+            color=color,
+        )
+        v = CasinoGameEntryView("pfc")
+        self.bot.add_view(v)
+        await ctx.send(embed=emb, view=v)
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):

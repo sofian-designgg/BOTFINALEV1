@@ -76,6 +76,48 @@ class EconomyCog(commands.Cog):
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
+    @commands.command(name="balanceembed")
+    async def balanceembed(self, ctx):
+        """Poste un embed avec bouton pour afficher son solde."""
+        try:
+            config = await get_guild_config(ctx.guild.id)
+            currency_emoji = config.get("currency_emoji", "💰")
+            color = await get_guild_color(ctx.guild.id)
+
+            v = discord.ui.View(timeout=None)
+            btn = discord.ui.Button(
+                label="Afficher mon compte bancaire",
+                style=discord.ButtonStyle.success,
+                custom_id="bank:show",
+            )
+
+            async def cb(interaction: discord.Interaction):
+                if not interaction.guild:
+                    return
+                bal = await get_balance(interaction.guild.id, interaction.user.id)
+                conf = await get_guild_config(interaction.guild.id)
+                currency_name = conf.get("currency_name", "SayuCoins")
+                currency_emoji2 = conf.get("currency_emoji", "💰")
+                emb = discord.Embed(
+                    title=f"{currency_emoji2} Ton compte bancaire",
+                    description=f"**{bal:,}** {currency_name}",
+                    color=await get_guild_color(interaction.guild.id),
+                )
+                await interaction.response.send_message(embed=emb, ephemeral=True)
+
+            btn.callback = cb
+            v.add_item(btn)
+            await ctx.send(
+                embed=discord.Embed(
+                    title=f"{currency_emoji} Banque",
+                    description="Clique sur le bouton pour afficher ton solde en privé.",
+                    color=color,
+                ),
+                view=v,
+            )
+        except Exception as e:
+            await ctx.send(embed=error_embed("Erreur", str(e)))
+
     @commands.command(name="daily")
     async def daily(self, ctx):
         """Récompense quotidienne avec streak bonus"""

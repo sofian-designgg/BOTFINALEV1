@@ -22,6 +22,7 @@ CONSULT_COMMANDS = {
     "casino slots", "casino flip", "casino pfc", "casino blackjack",
     "casinoranks", "casinoranks me",
     "hierarchie",
+    "balanceembed", "rankembed", "statsembed",
     "shop", "inventory", "glist",
     # Récompenses (non-staff)
     "daily", "weekly",

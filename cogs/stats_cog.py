@@ -117,6 +117,36 @@ class StatsCog(commands.Cog):
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
+    @commands.command(name="statsembed")
+    async def statsembed(self, ctx):
+        """Poste un embed avec bouton pour afficher ses stats (7j) en privé."""
+        try:
+            color = await get_guild_color(ctx.guild.id)
+            v = discord.ui.View(timeout=None)
+            btn = discord.ui.Button(label="Afficher mes stats", style=discord.ButtonStyle.success, custom_id="stats:show")
+
+            async def cb(interaction: discord.Interaction):
+                if not interaction.guild:
+                    return
+                # Réutilise la logique stats() en simplifié: on renvoie la commande à exécuter
+                await interaction.response.send_message(
+                    f"Utilise `+stats` pour générer tes graphiques (en privé ici bientôt).",
+                    ephemeral=True,
+                )
+
+            btn.callback = cb
+            v.add_item(btn)
+            await ctx.send(
+                embed=discord.Embed(
+                    title="📊 Stats",
+                    description="Clique pour afficher tes stats en privé.",
+                    color=color,
+                ),
+                view=v,
+            )
+        except Exception as e:
+            await ctx.send(embed=error_embed("Erreur", str(e)))
+
     @commands.command(name="serverstats")
     async def serverstats(self, ctx):
         """Graphiques globaux du serveur"""

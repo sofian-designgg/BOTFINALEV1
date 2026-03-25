@@ -6,14 +6,17 @@ from typing import Dict, List
 
 EXAMPLES_FR: Dict[str, List[str]] = {
     "balance": ["balance", "balance @membre"],
+    "balanceembed": ["balanceembed"],
     "daily": ["daily"],
     "weekly": ["weekly"],
     "pay": ["pay @membre 500"],
     "coinstop": ["coinstop", "coinstop 2"],
     "rank": ["rank", "rank @membre"],
+    "rankembed": ["rankembed"],
     "leaderboard": ["leaderboard", "leaderboard 2"],
     "setxp": ["setxp @membre 10000"],
     "stats": ["stats", "stats @membre"],
+    "statsembed": ["statsembed"],
     "ranking": ["ranking messages", "ranking vocal"],
     "shop": ["shop", "shop 2"],
     "buy": ["buy Nom de l'article"],

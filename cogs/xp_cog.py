@@ -147,6 +147,46 @@ class XPCog(commands.Cog):
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
+    @commands.command(name="rankembed")
+    async def rankembed(self, ctx):
+        """Poste un embed avec bouton pour afficher son rang XP."""
+        try:
+            color = await get_guild_color(ctx.guild.id)
+            v = discord.ui.View(timeout=None)
+            btn = discord.ui.Button(label="Afficher mon rank", style=discord.ButtonStyle.success, custom_id="xp:rank:show")
+
+            async def cb(interaction: discord.Interaction):
+                if not interaction.guild:
+                    return
+                col = get_collection("xp")
+                doc = await col.find_one({"guild_id": str(interaction.guild.id), "user_id": str(interaction.user.id)})
+                xp = doc.get("xp", 0) if doc else 0
+                cursor = col.find({"guild_id": str(interaction.guild.id)}).sort("xp", -1)
+                rank_num = 1
+                async for d in cursor:
+                    if d["user_id"] == str(interaction.user.id):
+                        break
+                    rank_num += 1
+                cfg = await get_guild_config(interaction.guild.id)
+                xp_name = cfg.get("xp_name", "XP")
+                emb = discord.Embed(title="📊 Ton rang", color=await get_guild_color(interaction.guild.id))
+                emb.add_field(name="Classement", value=f"#{rank_num}", inline=True)
+                emb.add_field(name=xp_name, value=f"{xp:,}", inline=True)
+                await interaction.response.send_message(embed=emb, ephemeral=True)
+
+            btn.callback = cb
+            v.add_item(btn)
+            await ctx.send(
+                embed=discord.Embed(
+                    title="📊 Rank",
+                    description="Clique pour afficher ton rang en privé.",
+                    color=color,
+                ),
+                view=v,
+            )
+        except Exception as e:
+            await ctx.send(embed=error_embed("Erreur", str(e)))
+
     @commands.command(name="leaderboard")
     async def leaderboard(self, ctx, page: int = 1):
         """Top 10 XP"""
