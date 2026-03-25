@@ -1694,22 +1694,31 @@ class CasinoCog(commands.Cog):
         is_admin_role = bool(admin_role_id and any(r.id == int(admin_role_id) for r in ctx.author.roles))
         if not ctx.author.guild_permissions.administrator and not is_admin_role:
             return await ctx.send(embed=error_embed("Ranks Casino", "Accès refusé (admin requis)."))
+        # feedback immédiat (commande peut être longue)
+        status_msg = await ctx.send(embed=discord.Embed(
+            title="⏳ Ranks Casino — sync",
+            description="Sync en cours… ça peut prendre un peu de temps selon le nombre de membres.",
+            color=await get_guild_color(ctx.guild.id),
+        ))
         await self._ranks_ensure_defaults(ctx.guild.id)
         cfg = await get_casino_ranks_config(ctx.guild.id)
         ranks = cfg.get("ranks") or []
         if not ranks:
-            return await ctx.send(embed=error_embed("Ranks Casino", "Setup requis."))
+            return await status_msg.edit(embed=error_embed("Ranks Casino", "Setup requis."))
         role_ids = [int(r["role_id"]) for r in ranks if r.get("role_id")]
         if not role_ids or len(role_ids) != len(ranks):
-            return await ctx.send(embed=error_embed("Ranks Casino", "Rôles manquants — lance `+casinoranks setup`."))
+            return await status_msg.edit(embed=error_embed("Ranks Casino", "Rôles manquants — lance `+casinoranks setup`."))
 
         targets = [member] if member else [m for m in ctx.guild.members if not m.bot]
         done = 0
-        for m in targets:
+        failed = 0
+        total = len(targets)
+        for i, m in enumerate(targets, start=1):
             net, games = await _casino_get_user_net_games(ctx.guild.id, m.id)
             idx = _casino_best_rank_index(ranks, net=net, games=games)
             want = ctx.guild.get_role(int(ranks[idx]["role_id"]))
             if not want:
+                failed += 1
                 continue
             to_remove = [r for r in m.roles if r.id in role_ids and r.id != want.id]
             try:
@@ -1719,8 +1728,21 @@ class CasinoCog(commands.Cog):
                     await m.add_roles(want, reason="Sync ranks casino")
                 done += 1
             except discord.HTTPException:
-                continue
-        await ctx.send(embed=success_embed("Ranks Casino", f"✅ Sync terminé : {done} membre(s).", await get_guild_color(ctx.guild.id)))
+                failed += 1
+            if total >= 30 and i in (10, 25, 50, 100, 200, 400, 800):
+                try:
+                    await status_msg.edit(embed=discord.Embed(
+                        title="⏳ Ranks Casino — sync",
+                        description=f"Progression: **{i}/{total}**\nRéussis: **{done}** · Échecs: **{failed}**",
+                        color=await get_guild_color(ctx.guild.id),
+                    ))
+                except Exception:
+                    pass
+        await status_msg.edit(embed=success_embed(
+            "Ranks Casino",
+            f"✅ Sync terminé : **{done}** membre(s) · Échecs: **{failed}**.",
+            await get_guild_color(ctx.guild.id),
+        ))
 
     @casinoranks.command(name="me")
     async def casinoranks_me(self, ctx):
