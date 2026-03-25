@@ -21,6 +21,8 @@ CONSULT_COMMANDS = {
     "casinostats", "casino", "trade", "tradecancel", "sellrole", "auctioncancel", "auctionbuyout",
     "casino slots", "casino flip", "casino pfc", "casino blackjack",
     "shop", "inventory", "glist",
+    # Récompenses (non-staff)
+    "daily", "weekly",
     "settings", "ping", "licenceinfo", "redeem",
     # Modération view only
     "warnings",
