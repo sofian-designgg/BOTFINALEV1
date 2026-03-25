@@ -23,6 +23,7 @@ CONSULT_COMMANDS = {
     "casinoranks", "casinoranks me",
     "hierarchie",
     "balanceembed", "rankembed", "statsembed",
+    "rankcasinoembed",
     "shop", "inventory", "glist",
     # Récompenses (non-staff)
     "daily", "weekly",

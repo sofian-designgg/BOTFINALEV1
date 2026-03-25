@@ -53,6 +53,7 @@ EXAMPLES_FR: Dict[str, List[str]] = {
     "casino blackjack": ["casino blackjack 200"],
     "casinoranks me": ["casinoranks me"],
     "hierarchie": ["hierarchie"],
+    "rankcasinoembed": ["rankcasinoembed"],
     "trade": ["trade @Fondateur Je propose ce rôle, je veux un rôle en échange"],
     "tradecancel": ["tradecancel a1b2c3d4e5"],
     "sellrole": ["sellrole @Rôle 500", "sellrole @Rôle 500 2000"],
