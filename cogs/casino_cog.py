@@ -1687,8 +1687,13 @@ class CasinoCog(commands.Cog):
         await ctx.send(embed=success_embed("Ranks Casino", f"✅ Palier #{index} mis à jour.", await get_guild_color(ctx.guild.id)))
 
     @casinoranks.command(name="sync")
-    @commands.has_permissions(administrator=True)
     async def casinoranks_sync(self, ctx, member: discord.Member = None):
+        # Autoriser admin Discord OU rôle admin configuré
+        gcfg = (await get_guild_config(ctx.guild.id)) or {}
+        admin_role_id = gcfg.get("admin_role_id")
+        is_admin_role = bool(admin_role_id and any(r.id == int(admin_role_id) for r in ctx.author.roles))
+        if not ctx.author.guild_permissions.administrator and not is_admin_role:
+            return await ctx.send(embed=error_embed("Ranks Casino", "Accès refusé (admin requis)."))
         await self._ranks_ensure_defaults(ctx.guild.id)
         cfg = await get_casino_ranks_config(ctx.guild.id)
         ranks = cfg.get("ranks") or []
