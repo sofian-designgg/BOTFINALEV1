@@ -127,12 +127,18 @@ class EconomyCog(commands.Cog):
             doc = await col_daily.find_one({"guild_id": str(ctx.guild.id), "user_id": str(ctx.author.id)})
             from discord.utils import utcnow
             now = utcnow()
+            # Normalise datetimes (Mongo peut contenir du naive)
+            if getattr(now, "tzinfo", None) is None:
+                from datetime import timezone
+                now = now.replace(tzinfo=timezone.utc)
 
             if doc:
                 last = doc.get("last_daily")
                 if last:
-                    from datetime import datetime, timezone
-                    last_dt = last if hasattr(last, 'date') else last
+                    from datetime import timezone
+                    last_dt = last
+                    if getattr(last_dt, "tzinfo", None) is None:
+                        last_dt = last_dt.replace(tzinfo=timezone.utc)
                     now_dt = now
                     diff = (now_dt - last_dt).total_seconds()
                     streak = doc.get("streak", 0)
@@ -181,9 +187,15 @@ class EconomyCog(commands.Cog):
             doc = await col_weekly.find_one({"guild_id": str(ctx.guild.id), "user_id": str(ctx.author.id)})
             from discord.utils import utcnow
             now = utcnow()
+            if getattr(now, "tzinfo", None) is None:
+                from datetime import timezone
+                now = now.replace(tzinfo=timezone.utc)
 
             if doc and doc.get("last_weekly"):
+                from datetime import timezone
                 last = doc["last_weekly"]
+                if getattr(last, "tzinfo", None) is None:
+                    last = last.replace(tzinfo=timezone.utc)
                 diff = (now - last).total_seconds()
                 if diff < 604800:  # 7 jours
                     secs_left = 604800 - diff
