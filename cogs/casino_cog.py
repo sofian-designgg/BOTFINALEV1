@@ -1012,7 +1012,8 @@ class CasinoCog(commands.Cog):
         if choix == bot_c:
             await add_coins(ctx.guild.id, ctx.author.id, mise)
             net = 0
-            await inc_casino_stat(ctx.guild.id, ctx.author.id, wagered=mise, won=0)
+            # Égalité = mise rendue : profit 0
+            await inc_casino_stat(ctx.guild.id, ctx.author.id, wagered=mise, won=mise)
             msg = "Égalité — mise rendue"
         elif wins[choix] == bot_c:
             gross = mise * 2
