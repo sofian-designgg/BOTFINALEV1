@@ -344,6 +344,8 @@ def _casino_help_full_embeds(color: int) -> List[discord.Embed]:
         ("`+trade @Rôle *message*`", "Tu **proposes** un rôle que tu possèdes : annonce + **un seul** partenaire répond ; fil privé, choix du rôle en échange, double confirmation. `+tradecancel [id]` (auteur)."),
         ("`+casinoranks me`", "Ton rang casino, tes bonus, et ta progression vers le prochain grade."),
         ("`+hierarchie`", "Liste complète des ranks casino (index + descriptifs + bonus)."),
+        ("`+embedslots` / `+embedflip` / `+embedpfc`", "Panels de jeu (embed + bouton) → mise → fil privé (postés par admin)."),
+        ("`+balanceembed` / `+rankembed` / `+statsembed`", "Panels bouton (hors casino) : banque, rank XP, stats."),
         ("**Qui peut jouer ?**", "Tout membre du serveur (avec licence bot active) peut utiliser les jeux **sans être staff**. Seules les mises comptent : si ton solde < mise min ou < mise choisie, le bot refuse."),
     ]
     lines_admin = [
@@ -726,6 +728,13 @@ class CasinoCog(commands.Cog):
         embed.add_field(
             name="🤝 Trade",
             value="`+trade` — si un salon trade est défini (`+settradechannel` / `chtrade`), uniquement dans ce salon.",
+            inline=False,
+        )
+        embed.add_field(
+            name="🏦 Panels utiles (hors casino)",
+            value="`+balanceembed` — bouton solde (banque)\n"
+            "`+rankembed` — bouton rank XP\n"
+            "`+statsembed` — bouton stats (messages/vocal)",
             inline=False,
         )
         embed.set_footer(text="Liste exhaustive sans exception : +helpcasinocomplet · Tout le monde peut jouer si solde ≥ mise min.")
