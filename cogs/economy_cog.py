@@ -119,37 +119,10 @@ class EconomyCog(commands.Cog):
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
-class BankPanelView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        btn = discord.ui.Button(
-            label="Afficher mon compte bancaire",
-            style=discord.ButtonStyle.success,
-            custom_id="bank:show",
-        )
-
-        async def cb(interaction: discord.Interaction):
-            if not interaction.guild:
-                return
-            bal = await get_balance(interaction.guild.id, interaction.user.id)
-            conf = await get_guild_config(interaction.guild.id)
-            currency_name = conf.get("currency_name", "SayuCoins")
-            currency_emoji2 = conf.get("currency_emoji", "💰")
-            emb = discord.Embed(
-                title=f"{currency_emoji2} Ton compte bancaire",
-                description=f"**{bal:,}** {currency_name}",
-                color=await get_guild_color(interaction.guild.id),
-            )
-            await interaction.response.send_message(embed=emb, ephemeral=True)
-
-        btn.callback = cb
-        self.add_item(btn)
-
     @commands.command(name="daily")
     async def daily(self, ctx):
         """Récompense quotidienne avec streak bonus"""
         try:
-            col = get_collection("economy")
             col_daily = get_collection("daily_streaks")
             doc = await col_daily.find_one({"guild_id": str(ctx.guild.id), "user_id": str(ctx.author.id)})
             from discord.utils import utcnow
@@ -166,8 +139,7 @@ class BankPanelView(discord.ui.View):
                     last_dt = last
                     if getattr(last_dt, "tzinfo", None) is None:
                         last_dt = last_dt.replace(tzinfo=timezone.utc)
-                    now_dt = now
-                    diff = (now_dt - last_dt).total_seconds()
+                    diff = (now - last_dt).total_seconds()
                     streak = doc.get("streak", 0)
                     if diff < 86400:  # pas encore 24h
                         secs_left = 86400 - diff
@@ -188,20 +160,20 @@ class BankPanelView(discord.ui.View):
             await col_daily.update_one(
                 {"guild_id": str(ctx.guild.id), "user_id": str(ctx.author.id)},
                 {"$set": {"last_daily": now, "streak": streak}},
-                upsert=True
+                upsert=True,
             )
 
             config = await get_guild_config(ctx.guild.id)
             currency_name = config.get("currency_name", "SayuCoins")
             currency_emoji = config.get("currency_emoji", "💰")
             color = await get_guild_color(ctx.guild.id)
-
-            embed = success_embed(
-                "Récompense quotidienne",
-                f"+**{amount:,}** {currency_name} {currency_emoji}\nStreak: **{streak}** jours",
-                color
+            await ctx.send(
+                embed=success_embed(
+                    "Récompense quotidienne",
+                    f"+**{amount:,}** {currency_name} {currency_emoji}\nStreak: **{streak}** jours",
+                    color,
+                )
             )
-            await ctx.send(embed=embed)
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
@@ -209,7 +181,6 @@ class BankPanelView(discord.ui.View):
     async def weekly(self, ctx):
         """Récompense hebdomadaire"""
         try:
-            col = get_collection("economy")
             col_weekly = get_collection("weekly_cooldowns")
             doc = await col_weekly.find_one({"guild_id": str(ctx.guild.id), "user_id": str(ctx.author.id)})
             from discord.utils import utcnow
@@ -234,20 +205,20 @@ class BankPanelView(discord.ui.View):
             await col_weekly.update_one(
                 {"guild_id": str(ctx.guild.id), "user_id": str(ctx.author.id)},
                 {"$set": {"last_weekly": now}},
-                upsert=True
+                upsert=True,
             )
 
             config = await get_guild_config(ctx.guild.id)
             currency_name = config.get("currency_name", "SayuCoins")
             currency_emoji = config.get("currency_emoji", "💰")
             color = await get_guild_color(ctx.guild.id)
-
-            embed = success_embed(
-                "Récompense hebdomadaire",
-                f"+**{WEEKLY_AMOUNT:,}** {currency_name} {currency_emoji}",
-                color
+            await ctx.send(
+                embed=success_embed(
+                    "Récompense hebdomadaire",
+                    f"+**{WEEKLY_AMOUNT:,}** {currency_name} {currency_emoji}",
+                    color,
+                )
             )
-            await ctx.send(embed=embed)
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
@@ -276,22 +247,22 @@ class BankPanelView(discord.ui.View):
             currency_name = config.get("currency_name", "SayuCoins")
             currency_emoji = config.get("currency_emoji", "💰")
             color = await get_guild_color(ctx.guild.id)
-
-            embed = success_embed(
-                "Transfert",
-                f"**{amount:,}** {currency_name} {currency_emoji} envoyés à **{member}**.",
-                color
+            await ctx.send(
+                embed=success_embed(
+                    "Transfert",
+                    f"**{amount:,}** {currency_name} {currency_emoji} envoyés à **{member}**.",
+                    color,
+                )
             )
-            await ctx.send(embed=embed)
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="addcoins")
     @staff_only()
     async def addcoins(self, ctx, member: discord.Member, amount: int):
-        """Ajoute de la monnaie (admin)"""
+        """Ajoute de la monnaie (staff)"""
         try:
-            amount = max(0, amount)
+            amount = max(0, int(amount))
             await add_coins(ctx.guild.id, member.id, amount)
             config = await get_guild_config(ctx.guild.id)
             currency_name = config.get("currency_name", "SayuCoins")
@@ -313,7 +284,7 @@ class BankPanelView(discord.ui.View):
     @commands.command(name="addallcoins")
     @staff_only()
     async def addallcoins(self, ctx, amount: int):
-        """Ajoute des SayuCoins à tous les membres (admin)"""
+        """Ajoute des SayuCoins à tous les membres (staff)"""
         try:
             amount = int(amount)
             if amount < 1:
@@ -337,13 +308,7 @@ class BankPanelView(discord.ui.View):
             currency_name = config.get("currency_name", "SayuCoins")
             currency_emoji = config.get("currency_emoji", "💰")
             color = await get_guild_color(ctx.guild.id)
-            await ctx.send(
-                embed=success_embed(
-                    "Coins",
-                    f"+**{amount:,}** {currency_name} {currency_emoji} pour **{n}** membres.",
-                    color,
-                )
-            )
+            await ctx.send(embed=success_embed("Coins", f"+**{amount:,}** {currency_name} {currency_emoji} pour **{n}** membres.", color))
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
@@ -366,7 +331,6 @@ class BankPanelView(discord.ui.View):
             lines = []
             medals = ["🥇", "🥈", "🥉"]
             config = await get_guild_config(ctx.guild.id)
-            currency_name = config.get("currency_name", "SayuCoins")
             currency_emoji = config.get("currency_emoji", "💰")
             color = await get_guild_color(ctx.guild.id)
             idx = 0
@@ -378,7 +342,7 @@ class BankPanelView(discord.ui.View):
                 lines.append(f"{medal} **{name}** — {bal:,} {currency_emoji}")
                 idx += 1
             embed = discord.Embed(
-                title=f"💰 Classement richesse",
+                title="💰 Classement richesse",
                 description="\n".join(lines) if lines else "Aucune donnée",
                 color=color,
             )
@@ -390,9 +354,9 @@ class BankPanelView(discord.ui.View):
     @commands.command(name="removecoins")
     @staff_only()
     async def removecoins(self, ctx, member: discord.Member, amount: int):
-        """Retire de la monnaie (admin)"""
+        """Retire de la monnaie (staff)"""
         try:
-            amount = max(0, amount)
+            amount = max(0, int(amount))
             success = await remove_coins(ctx.guild.id, member.id, amount)
             config = await get_guild_config(ctx.guild.id)
             currency_name = config.get("currency_name", "SayuCoins")
@@ -413,6 +377,33 @@ class BankPanelView(discord.ui.View):
         if isinstance(error, commands.CheckFailure):
             return await ctx.send(embed=error_embed("Coins", str(error)))
         raise error
+
+
+class BankPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        btn = discord.ui.Button(
+            label="Afficher mon compte bancaire",
+            style=discord.ButtonStyle.success,
+            custom_id="bank:show",
+        )
+
+        async def cb(interaction: discord.Interaction):
+            if not interaction.guild:
+                return
+            bal = await get_balance(interaction.guild.id, interaction.user.id)
+            conf = await get_guild_config(interaction.guild.id)
+            currency_name = conf.get("currency_name", "SayuCoins")
+            currency_emoji2 = conf.get("currency_emoji", "💰")
+            emb = discord.Embed(
+                title=f"{currency_emoji2} Ton compte bancaire",
+                description=f"**{bal:,}** {currency_name}",
+                color=await get_guild_color(interaction.guild.id),
+            )
+            await interaction.response.send_message(embed=emb, ephemeral=True)
+
+        btn.callback = cb
+        self.add_item(btn)
 
 
 async def setup(bot):
