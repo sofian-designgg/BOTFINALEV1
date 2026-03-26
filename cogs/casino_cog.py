@@ -435,13 +435,13 @@ class AuctionBidView(View):
 
 
 class AuctionJoinView(View):
-    """Bouton public : ajoute le membre au fil privé de l'enchère."""
+    """Bouton public : ouvre/rejoint le fil d'enchère."""
 
     def __init__(self, auction_id: str):
         super().__init__(timeout=None)
         self.add_item(
             Button(
-                label="Rejoindre l'enchère (fil privé)",
+                label="Rejoindre l'enchère (fil)",
                 style=discord.ButtonStyle.success,
                 custom_id=f"aucjoin:{auction_id}",
             )
@@ -457,6 +457,18 @@ async def _create_private_thread(channel: discord.abc.GuildChannel, name: str) -
         type=discord.ChannelType.private_thread,
         invitable=False,
         reason="Trade / enchère casino",
+    )
+
+
+async def _create_public_thread(channel: discord.abc.GuildChannel, name: str) -> discord.Thread:
+    """Crée un fil public visible par les membres."""
+    if not isinstance(channel, discord.TextChannel):
+        raise TypeError("Le salon doit être un salon texte pour créer un fil public.")
+    starter = await channel.send("🏷️ Enchère ouverte — discussion et offres ici.")
+    return await starter.create_thread(
+        name=name[:100],
+        auto_archive_duration=1440,
+        reason="Enchère casino (fil public)",
     )
 
 
@@ -1421,13 +1433,12 @@ class CasinoCog(commands.Cog):
         color = await get_guild_color(ctx.guild.id)
         try:
             tname = f"Enchère {role.name}"[:90]
-            thread = await _create_private_thread(ch, tname)
-            await _thread_add_user_safe(thread, ctx.author)
+            thread = await _create_public_thread(ch, tname)
             msg = await thread.send(embed=emb, view=view)
             self.bot.add_view(view)
             join_emb = discord.Embed(
                 title=f"🏷️ Enchère — {role.name}",
-                description=f"Fil **privé** : seuls les membres qui rejoignent peuvent voir les boutons d’enchère.\n"
+                description=f"Fil **public** : tous les membres peuvent voir/enchérir.\n"
                 f"Prix de départ : **{prix}** SayuCoins\n"
                 f"{f'Achat immédiat : **{buyout}** SC — le vendeur : `+auctionbuyout {aid} @acheteur`\n' if buyout else ''}"
                 f"`ID: {aid}`",
@@ -2076,7 +2087,7 @@ class CasinoCog(commands.Cog):
         emb = discord.Embed(
             title="🏷️ Enchères — panneau",
             description="Clique sur **Créer une enchère**, choisis le rôle + prix.\n"
-            "Un fil privé est créé pour les enchères.",
+            "Un fil public est créé pour les enchères.",
             color=color,
         )
         v = View(timeout=None)
@@ -2114,8 +2125,7 @@ class CasinoCog(commands.Cog):
             view = AuctionBidView(aid)
             ctx.bot.add_view(view)
             try:
-                thread = await _create_private_thread(interaction.channel, f"Enchère {role.name}")
-                await _thread_add_user_safe(thread, interaction.user)
+                thread = await _create_public_thread(interaction.channel, f"Enchère {role.name}")
                 emb_th = discord.Embed(
                     title=f"🏷️ Enchère — {role.name}",
                     description=f"Vendeur: {interaction.user.mention}\nEnchère actuelle: **{start}**\n"
@@ -3123,6 +3133,12 @@ class CasinoCog(commands.Cog):
             thread = interaction.guild.get_thread(int(doc["thread_id"]))
             if not thread:
                 await interaction.response.send_message("Fil d’enchère introuvable (archivé ou supprimé).", ephemeral=True)
+                return
+            if thread.type != discord.ChannelType.private_thread:
+                await interaction.response.send_message(
+                    f"Fil public d’enchère : {thread.mention}",
+                    ephemeral=True,
+                )
                 return
             try:
                 await thread.add_user(interaction.user)
