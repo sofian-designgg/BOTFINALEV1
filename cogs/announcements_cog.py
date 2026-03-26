@@ -7,7 +7,10 @@ from database import get_collection, is_connected
 from utils.embeds import success_embed, error_embed
 from utils.guild_config import get_guild_config, get_guild_color
 from utils.checks import staff_only
-from dmall.sender import send_dm_all
+try:
+    from dmall.sender import send_dm_all  # type: ignore
+except ModuleNotFoundError:
+    send_dm_all = None
 
 
 class AnnouncementsCog(commands.Cog):
@@ -28,6 +31,14 @@ class AnnouncementsCog(commands.Cog):
     async def dmall(self, ctx, *, message: str):
         """Envoie un DM à tous les membres (anti-rate-limit, 3-6s entre chaque)"""
         try:
+            if send_dm_all is None:
+                return await ctx.send(
+                    embed=error_embed(
+                        "DM All",
+                        "Le module `dmall` est manquant sur l'hébergement.\n"
+                        "Installe-le ou supprime la commande `+dmall`.",
+                    )
+                )
             members = [m for m in ctx.guild.members if not m.bot]
             if not members:
                 await ctx.send(embed=error_embed("Erreur", "Aucun membre à contacter."))
