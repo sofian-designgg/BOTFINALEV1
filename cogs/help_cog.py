@@ -8,6 +8,7 @@ from database import is_connected
 from utils.embeds import error_embed
 from utils.guild_config import get_guild_color
 from utils.help_index import build_numbered_sections, chunk_lines, flatten_commands
+from config import BOT_VERSION
 
 
 class HelpCog(commands.Cog):
@@ -29,7 +30,7 @@ class HelpCog(commands.Cog):
         total = len(flatten_commands(self.bot))
 
         intro = discord.Embed(
-            title="📚 AIDE — COMMANDES",
+            title=f"📚 AIDE — COMMANDES · {BOT_VERSION}",
             description=(
                 f"**Préfixe :** `{ctx.prefix}`\n"
                 f"**Total :** {total} commandes (numéros **1** à **{total}**).\n\n"
@@ -56,7 +57,7 @@ class HelpCog(commands.Cog):
             emb = discord.Embed(title="📋 LISTE NUMÉROTÉE", color=color)
             for fname, fval in batch:
                 emb.add_field(name=fname, value=fval, inline=False)
-            emb.set_footer(text=f"{total} commandes · +detail <n> pour la fiche détaillée")
+            emb.set_footer(text=f"{BOT_VERSION} · {total} commandes · +detail <n> pour la fiche détaillée")
             await ctx.send(embed=emb)
 
 

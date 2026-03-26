@@ -10,6 +10,9 @@ load_dotenv()
 TOKEN = os.getenv("TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
+# Version affichée dans +help
+BOT_VERSION = os.getenv("BOT_VERSION", "v1")
+
 # MongoDB
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 
