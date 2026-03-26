@@ -121,6 +121,8 @@ async def before_command(ctx):
 
 async def load_extensions():
     """Charge tous les cogs"""
+    # Stocke les erreurs de chargement pour +diag
+    bot.ext_failures = {}
     cogs = [
         "cogs.config_cog",
         "cogs.help_cog",
@@ -148,6 +150,7 @@ async def load_extensions():
             print(f"  [OK] {cog}")
         except Exception as e:
             print(f"  [FAIL] {cog}: {e}")
+            bot.ext_failures[cog] = repr(e)
 
 
 async def main():

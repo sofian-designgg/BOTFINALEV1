@@ -6,6 +6,7 @@ import discord
 from discord.ext import commands
 from database import get_collection, is_connected, get_db
 from utils.embeds import success_embed, error_embed, info_embed
+from config import BOT_VERSION
 
 
 class DatabaseCog(commands.Cog):
@@ -37,6 +38,45 @@ class DatabaseCog(commands.Cog):
             await msg.edit(content=None, embed=embed)
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
+
+    @commands.command(name="diag")
+    async def diag(self, ctx):
+        """Diagnostic: version, cogs chargés, commandes clés, erreurs de chargement."""
+        try:
+            color = 0x5865F2
+            ext_fail = getattr(self.bot, "ext_failures", {}) or {}
+            addcoins_cmd = self.bot.get_command("addcoins")
+            econ_loaded = self.bot.get_cog("EconomyCog") is not None
+
+            embed = discord.Embed(
+                title=f"🧪 Diagnostic bot · {BOT_VERSION}",
+                description="Ce message sert à vérifier si tu exécutes le bon bot et si les cogs sont chargés.",
+                color=color,
+            )
+            embed.add_field(name="Préfixe", value=f"`{ctx.prefix}`", inline=True)
+            embed.add_field(name="EconomyCog chargé", value="✅" if econ_loaded else "❌", inline=True)
+            embed.add_field(name="Commande addcoins", value="✅" if addcoins_cmd else "❌", inline=True)
+
+            if addcoins_cmd:
+                embed.add_field(name="addcoins (qualified)", value=f"`{addcoins_cmd.qualified_name}`", inline=False)
+
+            if ext_fail:
+                # limite à 8 pour rester lisible
+                lines = [f"- `{k}`: `{v}`" for k, v in list(ext_fail.items())[:8]]
+                embed.add_field(
+                    name="Erreurs chargement cogs",
+                    value="\n".join(lines),
+                    inline=False,
+                )
+                if len(ext_fail) > 8:
+                    embed.add_field(name="…", value=f"+{len(ext_fail) - 8} autres", inline=False)
+            else:
+                embed.add_field(name="Erreurs chargement cogs", value="Aucune.", inline=False)
+
+            embed.set_footer(text="Si addcoins=❌ : tu lances le mauvais fichier ou un cog a crash au boot.")
+            await ctx.send(embed=embed)
+        except Exception as e:
+            await ctx.send(embed=error_embed("Diag", str(e)))
 
     @commands.command(name="dbstatus")
     async def dbstatus(self, ctx):
