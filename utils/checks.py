@@ -47,6 +47,10 @@ async def is_staff(ctx) -> bool:
         return True
     config = (await get_guild_config(ctx.guild.id)) or {}
     admin_role_id = config.get("admin_role_id")
+    try:
+        admin_role_id = int(admin_role_id) if admin_role_id is not None else None
+    except (TypeError, ValueError):
+        admin_role_id = None
     if admin_role_id and any(r.id == admin_role_id for r in ctx.author.roles):
         return True
     return False
@@ -109,6 +113,10 @@ async def interaction_is_staff(interaction: discord.Interaction) -> bool:
         return True
     config = (await get_guild_config(guild.id)) or {}
     admin_role_id = config.get("admin_role_id")
+    try:
+        admin_role_id = int(admin_role_id) if admin_role_id is not None else None
+    except (TypeError, ValueError):
+        admin_role_id = None
     if admin_role_id and any(r.id == admin_role_id for r in member.roles):
         return True
     return False
