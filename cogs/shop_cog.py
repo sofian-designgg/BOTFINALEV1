@@ -7,6 +7,7 @@ from discord.ui import Button, View
 from database import get_collection, is_connected
 from utils.embeds import success_embed, error_embed, get_progress_bar
 from utils.guild_config import get_guild_config, get_guild_color
+from utils.checks import staff_only
 from cogs.economy_cog import get_balance, add_coins, remove_coins
 
 
@@ -170,7 +171,7 @@ class ShopCog(commands.Cog):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="additem")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def additem(self, ctx, name: str, price: int, description: str, emoji: str = "📦"):
         """Ajoute un article au shop (admin)"""
         try:
@@ -189,7 +190,7 @@ class ShopCog(commands.Cog):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="removeitem")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def removeitem(self, ctx, *, name: str):
         """Retire un article (admin)"""
         try:
@@ -204,7 +205,7 @@ class ShopCog(commands.Cog):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="edititem")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def edititem(self, ctx, name: str, field: str, *, value: str):
         """Modifie un article: prix ou description (admin)"""
         try:

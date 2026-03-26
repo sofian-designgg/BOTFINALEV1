@@ -8,6 +8,7 @@ from discord.ext import commands
 from database import connect_db, close_db, is_connected, get_collection
 from utils.guild_config import get_prefix
 from utils.checks import can_use_command, CONSULT_COMMANDS
+from utils.embeds import error_embed
 from config import TOKEN, MONGO_URL, OWNER_ID
 
 # Intents
@@ -54,6 +55,24 @@ async def on_ready():
     print(f"Bot connecté : {bot.user.name}#{bot.user.discriminator}")
     print(f"MongoDB : {status} {'Connecté' if mongo_ok else 'Déconnecté'}")
     print("=" * 50)
+
+
+@bot.event
+async def on_command_error(ctx, error):
+    """Messages clairs pour CheckFailure (ex. staff_only) sans doublon avec before_invoke."""
+    if isinstance(error, commands.CommandNotFound):
+        return
+    if isinstance(error, commands.CommandOnCooldown):
+        return await ctx.send(
+            embed=error_embed("Cooldown", f"Réessaie dans {error.retry_after:.1f}s.")
+        )
+    orig = error.original if isinstance(error, commands.CommandInvokeError) else error
+    if isinstance(orig, commands.CheckFailure):
+        msg = str(orig)
+        if msg in ("No license", "Staff only"):
+            return
+        await ctx.send(embed=error_embed("Commande impossible", msg))
+        return
 
 
 @bot.before_invoke

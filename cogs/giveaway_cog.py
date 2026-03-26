@@ -9,6 +9,7 @@ from discord.ui import Button, View
 from database import get_collection, is_connected
 from utils.embeds import success_embed, error_embed
 from utils.guild_config import get_guild_config, get_guild_color
+from utils.checks import staff_only
 
 
 def parse_duration(s: str) -> int:
@@ -77,7 +78,7 @@ class GiveawayCog(commands.Cog):
         return True
 
     @commands.command(name="gcreate")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def gcreate(self, ctx, duration: str, winners: int, *, prize: str):
         """+gcreate [durée] [gagnants] [prix] — Crée un giveaway"""
         try:
@@ -115,7 +116,7 @@ class GiveawayCog(commands.Cog):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="gend")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def gend(self, ctx, message_id: int):
         """Termine un giveaway immédiatement"""
         try:
@@ -152,7 +153,7 @@ class GiveawayCog(commands.Cog):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="greroll")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def greroll(self, ctx, message_id: int):
         """Re-tire un gagnant"""
         try:
@@ -173,7 +174,7 @@ class GiveawayCog(commands.Cog):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="glist")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def glist(self, ctx):
         """Liste les giveaways actifs"""
         try:

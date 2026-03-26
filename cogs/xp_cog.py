@@ -7,6 +7,7 @@ from discord.ext import commands
 from database import get_collection, is_connected
 from utils.embeds import success_embed, error_embed
 from utils.guild_config import get_guild_config, get_guild_color
+from utils.checks import staff_only
 
 XP_COOLDOWN = 60  # secondes
 XP_PER_MESSAGE = (15, 25)
@@ -245,7 +246,7 @@ class XPRankPanelView(discord.ui.View):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="setxp")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def setxp(self, ctx, member: discord.Member, amount: int):
         """Définit l'XP d'un membre (admin)"""
         try:
@@ -262,7 +263,7 @@ class XPRankPanelView(discord.ui.View):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="resetxp")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def resetxp(self, ctx, member: discord.Member):
         """Réinitialise l'XP d'un membre (admin)"""
         try:
@@ -278,7 +279,7 @@ class XPRankPanelView(discord.ui.View):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="xpmulti")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def xpmulti(self, ctx, role: discord.Role, multiplier: float):
         """Multiplicateur XP pour un rôle (ex: 2 = x2 XP)"""
         try:

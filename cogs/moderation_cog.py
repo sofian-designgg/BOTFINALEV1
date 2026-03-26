@@ -8,6 +8,7 @@ from discord import app_commands
 from database import get_collection, is_connected
 from utils.embeds import success_embed, error_embed, get_progress_bar
 from utils.guild_config import get_guild_config, get_guild_color
+from utils.checks import staff_only
 
 # Parsing durée: 1m, 1h, 1d
 def parse_duration(s: str) -> int:
@@ -299,7 +300,7 @@ class ModerationCog(commands.Cog):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="lockdown")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def lockdown(self, ctx):
         """Verrouille tous les salons textuels"""
         try:
@@ -316,7 +317,7 @@ class ModerationCog(commands.Cog):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="unlockdown")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def unlockdown(self, ctx):
         """Déverrouille tous les salons"""
         try:

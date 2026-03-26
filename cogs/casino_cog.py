@@ -16,6 +16,7 @@ from discord.ui import Button, View, Select, Modal, TextInput
 from database import get_collection, is_connected
 from utils.embeds import success_embed, error_embed, get_progress_bar
 from utils.guild_config import get_guild_config, get_guild_color
+from utils.checks import staff_only, interaction_is_staff
 from cogs.economy_cog import get_balance, add_coins, remove_coins
 
 DEFAULT_CASINO = {
@@ -350,7 +351,7 @@ def _casino_help_full_embeds(color: int) -> List[discord.Embed]:
         ("**Qui peut jouer ?**", "Tout membre du serveur (avec licence bot active) peut utiliser les jeux **sans être staff**. Seules les mises comptent : si ton solde < mise min ou < mise choisie, le bot refuse."),
     ]
     lines_admin = [
-        ("`+casinopanel`", "Panneau admin avec boutons (rappels + ON/OFF casino). **Administrateur Discord** requis."),
+        ("`+casinopanel`", "Panneau admin avec boutons (rappels + ON/OFF casino). **Staff** (admin Discord ou rôle admin bot)."),
         ("`+casinoset`", "Groupe parent : affiche la liste des sous-commandes si tu ne mets pas d’argument."),
         ("`+casinoset minbet [n]`", "Mise **minimum** (SayuCoins) pour jouer."),
         ("`+casinoset maxbet [n]`", "Mise **maximum**."),
@@ -626,8 +627,8 @@ class CasinoConfigView(View):
 
     @discord.ui.button(label="📖 Aide commandes", style=discord.ButtonStyle.primary, row=0)
     async def b1(self, interaction: discord.Interaction, btn: Button):
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("Admin requis.", ephemeral=True)
+        if not await interaction_is_staff(interaction):
+            await interaction.response.send_message("Staff requis (admin ou rôle admin bot).", ephemeral=True)
             return
         txt = (
             "**Réglages rapides (tapez dans le salon) :**\n"
@@ -644,8 +645,8 @@ class CasinoConfigView(View):
 
     @discord.ui.button(label="ON / OFF casino", style=discord.ButtonStyle.danger, row=0)
     async def b2(self, interaction: discord.Interaction, btn: Button):
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("Admin requis.", ephemeral=True)
+        if not await interaction_is_staff(interaction):
+            await interaction.response.send_message("Staff requis (admin ou rôle admin bot).", ephemeral=True)
             return
         cfg = await get_casino_config(interaction.guild.id)
         new = not cfg.get("enabled", True)
@@ -654,8 +655,8 @@ class CasinoConfigView(View):
 
     @discord.ui.button(label="Salons (IDs)", style=discord.ButtonStyle.secondary, row=1)
     async def b3(self, interaction: discord.Interaction, btn: Button):
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("Admin requis.", ephemeral=True)
+        if not await interaction_is_staff(interaction):
+            await interaction.response.send_message("Staff requis (admin ou rôle admin bot).", ephemeral=True)
             return
         await interaction.response.send_message(
             "Collez l’ID du salon (clic droit → Copier l’identifiant) puis :\n"
@@ -666,8 +667,8 @@ class CasinoConfigView(View):
 
     @discord.ui.button(label="Taxe & limites", style=discord.ButtonStyle.secondary, row=1)
     async def b4(self, interaction: discord.Interaction, btn: Button):
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("Admin requis.", ephemeral=True)
+        if not await interaction_is_staff(interaction):
+            await interaction.response.send_message("Staff requis (admin ou rôle admin bot).", ephemeral=True)
             return
         await interaction.response.send_message(
             "`+casinoset fee 5` — taxe sur les gains (0–50%)\n"
@@ -764,6 +765,11 @@ class CasinoCog(commands.Cog):
             "`+statsembed` — bouton stats (messages/vocal)",
             inline=False,
         )
+        embed.add_field(
+            name="💰 Économie (staff)",
+            value="`+addcoins @membre [montant]` · `+addallcoins [montant]` · `+removecoins` — réservés au staff (voir aussi `+help` → Économie).",
+            inline=False,
+        )
         embed.set_footer(text="Liste exhaustive sans exception : +helpcasinocomplet · Tout le monde peut jouer si solde ≥ mise min.")
         await ctx.send(embed=embed)
 
@@ -805,7 +811,7 @@ class CasinoCog(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="casinopanel")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def casinopanel(self, ctx):
         view = CasinoConfigView()
         embed = discord.Embed(
@@ -820,7 +826,7 @@ class CasinoCog(commands.Cog):
         await ctx.send(embed=embed, view=view)
 
     @commands.group(name="casinoset", invoke_without_command=True)
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def casinoset(self, ctx):
         await ctx.send(embed=error_embed(
             "Casino",
@@ -1479,13 +1485,13 @@ class CasinoCog(commands.Cog):
         await ctx.send(embed=success_embed("Enchères", "Enchère annulée.", await get_guild_color(ctx.guild.id)))
 
     @commands.command(name="settradechannel", aliases=["setchanneltrade", "salontrade", "tradechannel"])
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def settradechannel(self, ctx, channel: discord.TextChannel = None):
         """Définit le salon où +trade est autorisé (sans salon = partout). Même effet que +casinoset chtrade."""
         await self._set_ch(ctx, "channel_trade", channel)
 
     @commands.command(name="setrankcasino", aliases=["setcasinorank", "setrankscasino"])
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def setrankcasino(self, ctx, channel: discord.TextChannel = None):
         """Définit le salon où le panel ranks casino est posté (sans salon = reset)."""
         if channel is None:
@@ -1567,7 +1573,7 @@ class CasinoCog(commands.Cog):
             return
 
     @casinoranks.command(name="setup")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def casinoranks_setup(self, ctx):
         """Crée les rôles casino (emoji | nom) et les place en hiérarchie."""
         await self._ranks_ensure_defaults(ctx.guild.id)
@@ -1649,7 +1655,7 @@ class CasinoCog(commands.Cog):
         return emb
 
     @casinoranks.command(name="panel")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def casinoranks_panel(self, ctx):
         await self._ranks_ensure_defaults(ctx.guild.id)
         cfg = await get_casino_ranks_config(ctx.guild.id)
@@ -1674,7 +1680,7 @@ class CasinoCog(commands.Cog):
         await ctx.send(embed=success_embed("Ranks Casino", f"Panel posté : {m.jump_url}", await get_guild_color(ctx.guild.id)))
 
     @casinoranks.command(name="setreq")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def casinoranks_setreq(self, ctx, index: int, net: int, parties: int):
         await self._ranks_ensure_defaults(ctx.guild.id)
         cfg = await get_casino_ranks_config(ctx.guild.id)
@@ -1888,7 +1894,7 @@ class CasinoCog(commands.Cog):
         )
 
     @commands.command(name="embedtrade")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def embedtrade(self, ctx):
         """Panel: créer un trade via modal (annonce temporaire)."""
         color = await get_guild_color(ctx.guild.id)
@@ -1998,7 +2004,7 @@ class CasinoCog(commands.Cog):
         await ctx.send(embed=emb, view=v)
 
     @commands.command(name="embedauction")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def embedauction(self, ctx):
         """Panel: créer une enchère via modal (annonce temporaire)."""
         color = await get_guild_color(ctx.guild.id)
@@ -2980,7 +2986,7 @@ class CasinoCog(commands.Cog):
             pass
 
     @commands.command(name="embedslots")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def embedslots(self, ctx):
         color = await get_guild_color(ctx.guild.id)
         emb = discord.Embed(
@@ -2993,7 +2999,7 @@ class CasinoCog(commands.Cog):
         await ctx.send(embed=emb, view=v)
 
     @commands.command(name="embedflip")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def embedflip(self, ctx):
         color = await get_guild_color(ctx.guild.id)
         emb = discord.Embed(
@@ -3006,7 +3012,7 @@ class CasinoCog(commands.Cog):
         await ctx.send(embed=emb, view=v)
 
     @commands.command(name="embedpfc")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def embedpfc(self, ctx):
         color = await get_guild_color(ctx.guild.id)
         emb = discord.Embed(
@@ -3019,7 +3025,7 @@ class CasinoCog(commands.Cog):
         await ctx.send(embed=emb, view=v)
 
     @commands.command(name="embedblackjack", aliases=["embedbj"])
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def embedblackjack(self, ctx):
         color = await get_guild_color(ctx.guild.id)
         emb = discord.Embed(

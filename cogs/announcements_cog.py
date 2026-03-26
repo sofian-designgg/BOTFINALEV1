@@ -6,6 +6,7 @@ from discord.ext import commands
 from database import get_collection, is_connected
 from utils.embeds import success_embed, error_embed
 from utils.guild_config import get_guild_config, get_guild_color
+from utils.checks import staff_only
 from dmall.sender import send_dm_all
 
 
@@ -22,7 +23,7 @@ class AnnouncementsCog(commands.Cog):
         return True
 
     @commands.command(name="dmall")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     @commands.cooldown(1, 600, commands.BucketType.guild)
     async def dmall(self, ctx, *, message: str):
         """Envoie un DM à tous les membres (anti-rate-limit, 3-6s entre chaque)"""
@@ -81,7 +82,7 @@ class AnnouncementsCog(commands.Cog):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="announce")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def announce(self, ctx, channel: discord.TextChannel, *, message: str):
         """Annonce stylisée dans un salon"""
         try:
@@ -100,7 +101,7 @@ class AnnouncementsCog(commands.Cog):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="embed")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def embed_cmd(self, ctx, *, text: str):
         """+embed [titre] | [description] — Crée un embed personnalisé"""
         try:

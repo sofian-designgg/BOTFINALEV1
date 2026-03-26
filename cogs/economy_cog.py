@@ -8,6 +8,7 @@ from discord import app_commands
 from database import get_collection, is_connected
 from utils.embeds import success_embed, error_embed, get_progress_bar
 from utils.guild_config import get_guild_config, get_guild_color
+from utils.checks import staff_only
 
 DAILY_AMOUNT = 500
 DAILY_STREAK_BONUS = 50
@@ -286,7 +287,7 @@ class BankPanelView(discord.ui.View):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="addcoins")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def addcoins(self, ctx, member: discord.Member, amount: int):
         """Ajoute de la monnaie (admin)"""
         try:
@@ -300,7 +301,7 @@ class BankPanelView(discord.ui.View):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="addallcoins")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def addallcoins(self, ctx, amount: int):
         """Ajoute des SayuCoins à tous les membres (admin)"""
         try:
@@ -367,7 +368,7 @@ class BankPanelView(discord.ui.View):
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
     @commands.command(name="removecoins")
-    @commands.has_permissions(administrator=True)
+    @staff_only()
     async def removecoins(self, ctx, member: discord.Member, amount: int):
         """Retire de la monnaie (admin)"""
         try:

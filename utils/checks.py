@@ -1,6 +1,9 @@
 """
 Vérifications de permissions
 """
+import discord
+from discord.ext import commands
+
 from utils.guild_config import get_guild_config
 
 
@@ -65,3 +68,47 @@ async def can_use_command(ctx, command_name: str) -> tuple[bool, str]:
         return True, ""
     # Sinon refusé
     return False, "Cette commande est réservée au staff. Seules la consultation (stats, rank, invites, shop...) est autorisée pour tous."
+
+
+def staff_only():
+    """
+    Commandes réservées au staff : aligné sur `can_use_command` / `is_staff`
+    (administrateur Discord **ou** rôle admin configuré avec `+setadminrole`),
+    ainsi que le propriétaire du bot.
+    Remplace `@commands.has_permissions(administrator=True)` qui ignorait le rôle admin du bot.
+    """
+    async def predicate(ctx: commands.Context) -> bool:
+        if ctx.author.id == ctx.bot.owner_id:
+            return True
+        if await is_staff(ctx):
+            return True
+        raise commands.CheckFailure(
+            "Réservé au staff : administrateur Discord ou rôle admin du bot (`+setadminrole`)."
+        )
+
+    return commands.check(predicate)
+
+
+async def interaction_is_staff(interaction: discord.Interaction) -> bool:
+    """
+    Même logique que is_staff pour les boutons / modals (pas de Context).
+    """
+    client = interaction.client
+    if interaction.user.id == getattr(client, "owner_id", None):
+        return True
+    guild = interaction.guild
+    if not guild:
+        return False
+    member = interaction.user
+    if not isinstance(member, discord.Member):
+        try:
+            member = await guild.fetch_member(interaction.user.id)
+        except Exception:
+            return False
+    if member.guild_permissions.administrator:
+        return True
+    config = (await get_guild_config(guild.id)) or {}
+    admin_role_id = config.get("admin_role_id")
+    if admin_role_id and any(r.id == admin_role_id for r in member.roles):
+        return True
+    return False
