@@ -61,7 +61,17 @@ async def on_ready():
 async def on_command_error(ctx, error):
     """Messages clairs pour CheckFailure (ex. staff_only) sans doublon avec before_invoke."""
     if isinstance(error, commands.CommandNotFound):
-        return
+        # Évite "silence total" quand l'utilisateur se trompe de préfixe / commande non chargée
+        attempted = (getattr(ctx, "invoked_with", None) or "").strip()
+        if attempted:
+            return await ctx.send(
+                embed=error_embed(
+                    "Commande inconnue",
+                    f"`{ctx.prefix}{attempted}` n'existe pas.\n"
+                    f"Utilise `{ctx.prefix}help` pour la liste complète.",
+                )
+            )
+        return await ctx.send(embed=error_embed("Commande inconnue", f"Utilise `{ctx.prefix}help` pour la liste complète."))
     if isinstance(error, commands.MissingRequiredArgument):
         usage = f"`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`".strip()
         return await ctx.send(embed=error_embed("Argument manquant", f"Utilisation : {usage}"))
