@@ -60,6 +60,7 @@ EXAMPLES_FR: Dict[str, List[str]] = {
     "auctioncancel": ["auctioncancel abcdef123456"],
     "auctionbuyout": ["auctionbuyout abcdef123456 @acheteur"],
     "settradechannel": ["settradechannel #salon-trade"],
+    "setrolechannelrank": ["setrolechannelrank #rank-up-casino"],
     "casinoset auctionchannel": ["casinoset auctionchannel #enchères"],
     "casinoset setchannel slots": ["casinoset setchannel slots #slots"],
     "detail": ["detail balance", "detail 12"],

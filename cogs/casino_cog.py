@@ -192,10 +192,24 @@ DEFAULT_CASINO_RANKS = [
 async def get_casino_ranks_config(gid: int) -> dict:
     col = get_collection("casino_ranks_config")
     if col is None:
-        return {"_id": str(gid), "enabled": False, "rank_channel_id": None, "panel_message_id": None, "ranks": []}
+        return {
+            "_id": str(gid),
+            "enabled": False,
+            "rank_channel_id": None,
+            "role_rank_channel_id": None,
+            "panel_message_id": None,
+            "ranks": [],
+        }
     doc = await col.find_one({"_id": str(gid)})
     if not doc:
-        return {"_id": str(gid), "enabled": False, "rank_channel_id": None, "panel_message_id": None, "ranks": []}
+        return {
+            "_id": str(gid),
+            "enabled": False,
+            "rank_channel_id": None,
+            "role_rank_channel_id": None,
+            "panel_message_id": None,
+            "ranks": [],
+        }
     return doc
 
 
@@ -381,6 +395,7 @@ def _casino_help_full_embeds(color: int) -> List[discord.Embed]:
         ("`+casinoranks panel`", "Poste / met à jour le panel de progression (embed) dans le salon ranks."),
         ("`+casinoranks sync`", "Attribue le bon rang à tous (ou un membre) selon net + parties."),
         ("`+casinoranks setreq [index] [net] [parties]`", "Modifie les conditions d’un rang (0–11)."),
+        ("`+setrolechannelrank #salon`", "Annonce chaque évolution de rôle casino dans le salon choisi."),
         ("`+casinoset lastgames [#salon]`", "Active le message auto « Dernières parties » dans un salon (sans salon = off)."),
         ("`+embedslots` `+embedflip` `+embedpfc` `+embedblackjack`", "Poste des panneaux de jeux (embed + bouton) : fil privé visible + bouton **Lancer la partie** + animations."),
     ]
@@ -727,7 +742,8 @@ class CasinoCog(commands.Cog):
             value="`+casinoranks me` — ton rang + progression\n"
             "`+casinoranks panel` — (admin) poste/maj le panel dans le salon ranks\n"
             "`+casinoranks setup` — (admin) crée la hiérarchie de rôles\n"
-            "`+setrankcasino #salon` — (admin) définit le salon panel",
+            "`+setrankcasino #salon` — (admin) définit le salon panel\n"
+            "`+setrolechannelrank #salon` — (admin) annonces d'évolution de rôle",
             inline=False,
         )
         embed.add_field(
@@ -1500,6 +1516,16 @@ class CasinoCog(commands.Cog):
         await update_casino_ranks_config(ctx.guild.id, {"rank_channel_id": str(channel.id)})
         await ctx.send(embed=success_embed("Ranks Casino", f"Salon ranks : {channel.mention}", await get_guild_color(ctx.guild.id)))
 
+    @commands.command(name="setrolechannelrank", aliases=["setrankrolechannel", "setrankupchannelcasino"])
+    @staff_only()
+    async def setrolechannelrank(self, ctx, channel: discord.TextChannel = None):
+        """Définit le salon des annonces d'évolution des rôles casino (sans salon = reset)."""
+        if channel is None:
+            await update_casino_ranks_config(ctx.guild.id, {"role_rank_channel_id": None})
+            return await ctx.send(embed=success_embed("Ranks Casino", "Salon annonces rôles reset.", await get_guild_color(ctx.guild.id)))
+        await update_casino_ranks_config(ctx.guild.id, {"role_rank_channel_id": str(channel.id)})
+        await ctx.send(embed=success_embed("Ranks Casino", f"Salon annonces rôles : {channel.mention}", await get_guild_color(ctx.guild.id)))
+
     @commands.group(name="casinoranks", aliases=["rankcasino", "rankscasino"], invoke_without_command=True)
     async def casinoranks(self, ctx):
         color = await get_guild_color(ctx.guild.id)
@@ -1563,6 +1589,7 @@ class CasinoCog(commands.Cog):
         if not want:
             return
         role_ids = {int(r["role_id"]) for r in ranks if r.get("role_id")}
+        before_rank_ids = {r.id for r in member.roles if r.id in role_ids}
         to_remove = [r for r in member.roles if r.id in role_ids and r.id != want.id]
         try:
             if to_remove:
@@ -1571,6 +1598,44 @@ class CasinoCog(commands.Cog):
                 await member.add_roles(want, reason="Auto ranks casino")
         except discord.HTTPException:
             return
+        after_rank_ids = (before_rank_ids - {r.id for r in to_remove}) | {want.id}
+        if before_rank_ids == after_rank_ids:
+            return
+        role_rank_channel_id = cfg.get("role_rank_channel_id")
+        if not role_rank_channel_id:
+            return
+        try:
+            ch = member.guild.get_channel(int(role_rank_channel_id))
+        except Exception:
+            ch = None
+        if isinstance(ch, discord.TextChannel):
+            try:
+                await ch.send(
+                    embed=success_embed(
+                        "🎉 Évolution casino",
+                        f"{member.mention} évolue vers **{want.name}** !",
+                        await get_guild_color(member.guild.id),
+                    )
+                )
+            except Exception:
+                pass
+
+    async def _delete_game_thread_later(self, interaction: discord.Interaction, delay_seconds: int = 10):
+        """Supprime le fil privé de partie après un court délai (best effort)."""
+        try:
+            ch = interaction.channel
+            if not isinstance(ch, discord.Thread):
+                return
+            await asyncio.sleep(max(1, int(delay_seconds)))
+            try:
+                await ch.delete(reason="Auto-cleanup game thread")
+            except discord.HTTPException:
+                try:
+                    await ch.edit(archived=True, locked=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     @casinoranks.command(name="setup")
     @staff_only()
@@ -2902,6 +2967,8 @@ class CasinoCog(commands.Cog):
                     for c in self.children:
                         c.disabled = True
                     await interaction2.response.edit_message(embed=discord.Embed(title="🃏 Blackjack", description=text, color=clr2), view=self)
+                    if cog:
+                        asyncio.create_task(cog._delete_game_thread_later(interaction2, 10))
 
                 @discord.ui.button(label="Tirer", style=discord.ButtonStyle.primary)
                 async def hit(self, interaction2: discord.Interaction, btn: Button):
@@ -2959,6 +3026,7 @@ class CasinoCog(commands.Cog):
             except Exception:
                 pass
             await self._ranks_autosync_member(interaction.user)
+            asyncio.create_task(self._delete_game_thread_later(interaction, 10))
             return
         else:
             await add_coins(interaction.guild.id, interaction.user.id, bet)
@@ -2984,6 +3052,7 @@ class CasinoCog(commands.Cog):
             await interaction.followup.send("✅ Partie terminée.", ephemeral=True)
         except Exception:
             pass
+        asyncio.create_task(self._delete_game_thread_later(interaction, 10))
 
     @commands.command(name="embedslots")
     @staff_only()
