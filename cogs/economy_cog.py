@@ -300,6 +300,16 @@ class BankPanelView(discord.ui.View):
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
 
+    @addcoins.error
+    async def addcoins_error(self, ctx, error):
+        if isinstance(error, commands.MissingRequiredArgument):
+            return await ctx.send(embed=error_embed("Coins", f"Utilisation : `{ctx.prefix}addcoins @membre montant`"))
+        if isinstance(error, commands.BadArgument):
+            return await ctx.send(embed=error_embed("Coins", f"Membre ou montant invalide.\nUtilisation : `{ctx.prefix}addcoins @membre montant`"))
+        if isinstance(error, commands.CheckFailure):
+            return await ctx.send(embed=error_embed("Coins", str(error)))
+        raise error
+
     @commands.command(name="addallcoins")
     @staff_only()
     async def addallcoins(self, ctx, amount: int):
@@ -336,6 +346,16 @@ class BankPanelView(discord.ui.View):
             )
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
+
+    @addallcoins.error
+    async def addallcoins_error(self, ctx, error):
+        if isinstance(error, commands.MissingRequiredArgument):
+            return await ctx.send(embed=error_embed("Coins", f"Utilisation : `{ctx.prefix}addallcoins montant`"))
+        if isinstance(error, commands.BadArgument):
+            return await ctx.send(embed=error_embed("Coins", f"Montant invalide.\nUtilisation : `{ctx.prefix}addallcoins montant`"))
+        if isinstance(error, commands.CheckFailure):
+            return await ctx.send(embed=error_embed("Coins", str(error)))
+        raise error
 
     @commands.command(name="coinstop")
     async def coinstop(self, ctx, page: int = 1):
@@ -383,6 +403,16 @@ class BankPanelView(discord.ui.View):
                 await ctx.send(embed=error_embed("Erreur", "Solde insuffisant."))
         except Exception as e:
             await ctx.send(embed=error_embed("Erreur", str(e)))
+
+    @removecoins.error
+    async def removecoins_error(self, ctx, error):
+        if isinstance(error, commands.MissingRequiredArgument):
+            return await ctx.send(embed=error_embed("Coins", f"Utilisation : `{ctx.prefix}removecoins @membre montant`"))
+        if isinstance(error, commands.BadArgument):
+            return await ctx.send(embed=error_embed("Coins", f"Membre ou montant invalide.\nUtilisation : `{ctx.prefix}removecoins @membre montant`"))
+        if isinstance(error, commands.CheckFailure):
+            return await ctx.send(embed=error_embed("Coins", str(error)))
+        raise error
 
 
 async def setup(bot):

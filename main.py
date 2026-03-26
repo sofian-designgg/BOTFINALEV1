@@ -62,6 +62,12 @@ async def on_command_error(ctx, error):
     """Messages clairs pour CheckFailure (ex. staff_only) sans doublon avec before_invoke."""
     if isinstance(error, commands.CommandNotFound):
         return
+    if isinstance(error, commands.MissingRequiredArgument):
+        usage = f"`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`".strip()
+        return await ctx.send(embed=error_embed("Argument manquant", f"Utilisation : {usage}"))
+    if isinstance(error, commands.BadArgument):
+        usage = f"`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`".strip()
+        return await ctx.send(embed=error_embed("Argument invalide", f"Utilisation : {usage}"))
     if isinstance(error, commands.CommandOnCooldown):
         return await ctx.send(
             embed=error_embed("Cooldown", f"Réessaie dans {error.retry_after:.1f}s.")
