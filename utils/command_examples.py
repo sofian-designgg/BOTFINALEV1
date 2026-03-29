@@ -77,6 +77,7 @@ EXAMPLES_FR: Dict[str, List[str]] = {
     "embedpfc": ["embedpfc"],
     "embedblackjack": ["embedblackjack"],
     "allrole": ["allrole @Rôle"],
+    "removeallrole": ["removeallrole @Rôle"],
     "casinopanel": ["casinopanel"],
     "casinoranks setup": ["casinoranks setup"],
     "casinoranks panel": ["casinoranks panel"],

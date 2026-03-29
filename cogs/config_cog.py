@@ -77,6 +77,49 @@ class ConfigCog(commands.Cog):
             await get_guild_color(ctx.guild.id),
         ))
 
+    @commands.command(name="removeallrole", aliases=["stripallrole", "removeallroles"])
+    async def removeallrole(self, ctx, role: discord.Role):
+        """Retire un rôle à tous les membres qui le possèdent (hors bots). Admin Discord ou rôle admin configuré."""
+        gcfg = (await get_guild_config(ctx.guild.id)) or {}
+        admin_role_id = gcfg.get("admin_role_id")
+        is_admin_role = bool(admin_role_id and any(r.id == int(admin_role_id) for r in ctx.author.roles))
+        if not ctx.author.guild_permissions.administrator and not is_admin_role:
+            return await ctx.send(embed=error_embed("Rôles", "Accès refusé (admin requis)."))
+        if role.managed or role.is_default():
+            return await ctx.send(embed=error_embed("Rôles", "Rôle invalide (managed/@everyone)."))
+        if role >= ctx.guild.me.top_role:
+            return await ctx.send(embed=error_embed("Rôles", "Le bot ne peut pas gérer ce rôle (hiérarchie)."))
+
+        targets = [m for m in ctx.guild.members if not m.bot and role in m.roles]
+        total = len(targets)
+        status = await ctx.send(embed=discord.Embed(
+            title="⏳ Retrait rôle",
+            description=f"Retrait de {role.mention} pour **{total}** membre(s)…",
+            color=await get_guild_color(ctx.guild.id),
+        ))
+        done = 0
+        failed = 0
+        for i, m in enumerate(targets, start=1):
+            try:
+                await m.remove_roles(role, reason=f"removeallrole par {ctx.author}")
+                done += 1
+            except discord.HTTPException:
+                failed += 1
+            if total >= 30 and i in (10, 25, 50, 100, 200, 400, 800):
+                try:
+                    await status.edit(embed=discord.Embed(
+                        title="⏳ Retrait rôle",
+                        description=f"Progression: **{i}/{total}**\nRetirés: **{done}** · Échecs: **{failed}**",
+                        color=await get_guild_color(ctx.guild.id),
+                    ))
+                except Exception:
+                    pass
+        await status.edit(embed=success_embed(
+            "Rôles",
+            f"✅ Terminé : rôle retiré pour **{done}** membre(s), échecs **{failed}**.",
+            await get_guild_color(ctx.guild.id),
+        ))
+
     @commands.command(name="setcolor")
     async def setcolor(self, ctx, hex_color: str):
         """Définit la couleur principale des embeds"""
